@@ -5,49 +5,8 @@ import numpy as np
 
 from quant_config.QuantConfig import *
 from ssm import SequentialSSM
-# from plot import *
-# from quantization_error import *
 from tensor_decomposition import *
 from kmeans import *
-
-
-# class SmoothScaleSelector(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.flatten = nn.Flatten(start_dim=0)
-#         self.s_C_selector = nn.Sequential(
-#             # nn.Linear(32 * 384 * 197 * 16, 16),
-#             # nn.Linear(16, 384),
-#             nn.Linear(384 * 197, 384),
-#         )
-#         self.s_D_selector = nn.Sequential(
-#             # nn.Linear(32 * 384 * 197 * 16, 16),
-#             nn.Linear(16 * 197, 16),
-#         )
-
-#     def forward(self, deltaB_x):
-#         # deltaB_x = self.flatten(deltaB_x.cpu())
-#         # s_C = self.s_C_selector(deltaB_x)
-#         # s_D = self.s_D_selector(deltaB_x)
-#         s_C = self.s_C_selector(self.flatten(deltaB_x.abs().amax((0, 3)).cpu())).abs() ** 0.5
-#         s_D = self.s_D_selector(self.flatten(deltaB_x.abs().amax((0, 1)).transpose(0, 1).cpu())).abs() ** 0.5
-#         return s_C, s_D
-    
-# class CLDSelector(nn.Module):
-#     def __init__(self, h_record):
-#         super().__init__()
-#         self.s_C = nn.parameter.Parameter(h_record.abs().mean((0, 2, 3)) ** 0.6)
-#         self.s_L = nn.parameter.Parameter(h_record.abs().mean((0, 1, 3)) ** 0.2)
-#         self.s_D = nn.parameter.Parameter(h_record.abs().mean((0, 1, 2)) ** 0.6)
-
-#     def forward(self):
-#         # print("========================")
-#         # print("s_C: ", self.s_C)
-#         # print("s_L: ", self.s_L)
-#         # print("s_D: ", self.s_D)
-#         # print("========================")
-#         return self.s_C + 1e-15, self.s_L + 1e-15, self.s_D + 1e-15
-
 
 class QuantSSM(SequentialSSM):
     """
@@ -61,9 +20,9 @@ class QuantSSM(SequentialSSM):
         mode = "raw",
         
         search_round = 1,
-        smooth_quant = 0,
-        represent = "mean",
-        trend = "std",
+        reparameterization = False,
+        representative = "mean",
+        dispersion = "std",
         power = "normalized",
         factor = "original",
 
@@ -78,9 +37,9 @@ class QuantSSM(SequentialSSM):
         self.mode = mode
 
         self.search_round = search_round
-        self.smooth_quant = smooth_quant
-        self.represent = represent
-        self.trend = trend
+        self.reparameterization = reparameterization
+        self.representative = representative
+        self.dispersion = dispersion
         self.power = power
         self.factor = factor
 
@@ -94,13 +53,8 @@ class QuantSSM(SequentialSSM):
         self.raw_grad = None
 
         self.s = None
-        self.s_C = None
-        self.s_D = None
-
-        # self.metric = "hessian"
-
-        # self.ssm = SSM()
-        # self.ssm_step = SSMStep()
+        self.r_C = None
+        self.r_D = None
 
     
     def ssm_step(self, h, deltaA, deltaB_x, C, step):
@@ -164,27 +118,22 @@ class QuantSSM(SequentialSSM):
     
     def _quantile(self, tensor, quantile):
         if tensor.numel() >= 16777216:
-            n = tensor.size(0)  # 第一維度的大小
-            m = tensor.size(1)  # 第二維度的大小
+            n = tensor.size(0)
+            m = tensor.size(1)
             
-            # 如果第二個維度太大，將它分段處理
             if m >= 16777216:
-                num_segments = m // 16777216  # 將第二個維度分成 num_segments 段，每段大小為 16777216
+                num_segments = m // 16777216
                 segments = [torch.quantile(tensor[:, i*16777216:(i+1)*16777216], quantile, dim=1) 
                             for i in range(num_segments)]
                 
-                # 如果有剩餘的列，單獨處理
                 if m % 16777216 != 0:
                     remaining = torch.quantile(tensor[:, num_segments*16777216:], quantile, dim=1)
                     segments.append(remaining)
                 
-                # 對每個段的結果取平均值
                 return torch.stack(segments, dim=1).mean(dim=1)
             else:
-                # 第二個維度不太大，直接計算分位數
                 return torch.quantile(tensor, quantile, dim=1)
         else:
-            # 張量總元素數量小於 16777216，直接計算分位數
             return torch.quantile(tensor, quantile, dim=1)
 
 
@@ -208,36 +157,7 @@ class QuantSSM(SequentialSSM):
         h = 0
         ys = []
 
-        # if self.smooth_quant == 2:
-        #     self.s = (deltaB_x.abs().amax((0, 2, 3)) + 1e-15).detach()
-        #     deltaB_x = deltaB_x / self.s.unsqueeze(-1).unsqueeze(-1).to(deltaB_x.device)
-        # if self.smooth_quant == 3:
-        #     self.s = (deltaB_x.abs().amax((0, 2)) + 1e-15).detach()
-        # if self.smooth_quant == 4:
-        #     # self.s_C = (deltaB_x.abs().amax((0, 2, 3)) ** 0.5 + 1e-15).detach() # 384
-        #     # self.s_D = (deltaB_x.abs().amax((0, 1, 2)) ** 0.5 + 1e-15).detach() # 16
-        #     self.s_C = (deltaB_x.abs().mean((0, 2, 3)) ** 0.5 + 1e-15).detach() # 384
-        #     self.s_D = (deltaB_x.abs().mean((0, 1, 2)) ** 0.5 + 1e-15).detach() # 16
-        #     # self.s_C = (deltaB_x.abs().transpose(1, 3).flatten(start_dim=0, end_dim=2).quantile(0.999, dim=0) ** 0.5 + 1e-15).detach()
-        #     # self.s_D = (deltaB_x.abs().flatten(start_dim=0, end_dim=2).quantile(0.999, dim=0) ** 0.5 + 1e-15).detach()
-        #     self.s = self.s_C.unsqueeze(-1) * self.s_D # 384, 16
-
-        #     deltaB_x = deltaB_x / self.s.unsqueeze(1).to(deltaB_x.device)
-        #     C = C * self.s_D.unsqueeze(-1).to(C.device)
-        # if self.smooth_quant == 5:
-        #     self.s_C = (deltaB_x.abs().mean((0, 2, 3)) ** 0.5 + 1e-15).detach() # 384
-        #     self.s_L = (deltaB_x.abs().mean((0, 1, 3)) ** 0.2 + 1e-15).detach() # 197
-        #     self.s_D = (deltaB_x.abs().mean((0, 1, 2)) ** 0.5 + 1e-15).detach() # 16
-        #     self.sA = torch.cat([torch.ones(1).to(self.s_L.device), self.s_L[0:-1]]) / self.s_L # 197
-        #     self.sB = 1 / (self.s_C.unsqueeze(-1).unsqueeze(-1) * self.s_L.unsqueeze(-1) * self.s_D) # 384, 197, 16
-        #     self.sC = self.s_D.unsqueeze(-1) * self.s_L # 16, 197
-        #     self.sY = self.s_C # 384
-
-        #     deltaA = deltaA * self.sA.unsqueeze(-1).to(deltaA.device)
-        #     deltaB_x = deltaB_x * self.sB.to(deltaB_x.device)
-        #     C = C * self.sC.to(C.device)
-
-        if self.smooth_quant == 6:
+        if self.reparameterization:
             h_record = torch.zeros(deltaB_x.shape)
             for i in range(L):
                 h, _ = self.ssm_step(h, deltaA, deltaB_x, C, i)
@@ -245,208 +165,95 @@ class QuantSSM(SequentialSSM):
 
             h_record = h_record.abs().mean(0)
 
-            if self.represent == "max":
-                C_represent = h_record.amax((1, 2))
-                L_represent = h_record.amax((0, 2))
-                D_represent = h_record.amax((0, 1))
-            if self.represent == "mean":
-                C_represent = h_record.mean((1, 2))
-                L_represent = h_record.mean((0, 2))
-                D_represent = h_record.mean((0, 1))
-            if self.represent == "median":
-                C_represent = h_record.permute(0, 1, 2).reshape(h_record.shape[0], -1).median(dim=1).values
-                L_represent = h_record.permute(1, 0, 2).reshape(h_record.shape[1], -1).median(dim=1).values
-                D_represent = h_record.permute(2, 1, 0).reshape(h_record.shape[2], -1).median(dim=1).values
-            if self.represent == "percentile_p99":
-                C_represent = h_record.amax((1, 2)) * 0.99
-                L_represent = h_record.amax((0, 2)) * 0.99
-                D_represent = h_record.amax((0, 1)) * 0.99
-            if self.represent == "percentile_p5":
-                C_represent = h_record.amax((1, 2)) * 0.5
-                L_represent = h_record.amax((0, 2)) * 0.5
-                D_represent = h_record.amax((0, 1)) * 0.5
-            if self.represent == "quantile_q99":
-                C_represent = self._quantile(h_record.permute(0, 1, 2).reshape(h_record.shape[0], -1), 0.99)
-                L_represent = self._quantile(h_record.permute(1, 0, 2).reshape(h_record.shape[1], -1), 0.99)
-                D_represent = self._quantile(h_record.permute(2, 1, 0).reshape(h_record.shape[2], -1), 0.99)
-                # C_represent = h_record.abs().permute(1, 0, 2, 3).reshape(h_record.shape[1], -1).quantile(q=0.99, dim=1).values
-                # L_represent = h_record.abs().permute(2, 1, 0, 3).reshape(h_record.shape[2], -1).quantile(q=0.99, dim=1).values
-                # D_represent = h_record.abs().permute(3, 1, 2, 0).reshape(h_record.shape[3], -1).quantile(q=0.99, dim=1).values
-            if self.represent == "HOSVD":
-                C_represent, L_represent, D_represent = hosvd_decomposition(h_record.abs())
-            if self.represent == "CP":
-                C_represent, L_represent, D_represent = cp_decomposition(h_record.abs())
-            # if self.represent == "ML":
-            #     C_represent, L_represent, D_represent = ml_decomposition(h_record.abs())
+            if self.representative == "max":
+                C_rep = h_record.amax((1, 2))
+                L_rep = h_record.amax((0, 2))
+                D_rep = h_record.amax((0, 1))
+            if self.representative == "mean":
+                C_rep = h_record.mean((1, 2))
+                L_rep = h_record.mean((0, 2))
+                D_rep = h_record.mean((0, 1))
+            if self.representative == "median":
+                C_rep = h_record.permute(0, 1, 2).reshape(h_record.shape[0], -1).median(dim=1).values
+                L_rep = h_record.permute(1, 0, 2).reshape(h_record.shape[1], -1).median(dim=1).values
+                D_rep = h_record.permute(2, 1, 0).reshape(h_record.shape[2], -1).median(dim=1).values
+            if self.representative == "percentile_p99":
+                C_rep = h_record.amax((1, 2)) * 0.99
+                L_rep = h_record.amax((0, 2)) * 0.99
+                D_rep = h_record.amax((0, 1)) * 0.99
+            if self.representative == "percentile_p5":
+                C_rep = h_record.amax((1, 2)) * 0.5
+                L_rep = h_record.amax((0, 2)) * 0.5
+                D_rep = h_record.amax((0, 1)) * 0.5
+            if self.representative == "quantile_q99":
+                C_rep = self._quantile(h_record.permute(0, 1, 2).reshape(h_record.shape[0], -1), 0.99)
+                L_rep = self._quantile(h_record.permute(1, 0, 2).reshape(h_record.shape[1], -1), 0.99)
+                D_rep = self._quantile(h_record.permute(2, 1, 0).reshape(h_record.shape[2], -1), 0.99)
+            if self.representative == "HOSVD":
+                C_rep, L_rep, D_rep = hosvd_decomposition(h_record.abs())
+            if self.representative == "CP":
+                C_rep, L_rep, D_rep = cp_decomposition(h_record.abs())
 
-            if self.trend == "same":
-                C_trend = 1
-                L_trend = 1
-                D_trend = 1
-            if self.trend == "std":
-                C_trend = C_represent.std()
-                L_trend = L_represent.std()
-                D_trend = D_represent.std()
-            if self.trend == "var":
-                C_trend = C_represent.var()
-                L_trend = L_represent.var()
-                D_trend = D_represent.var()
-            if self.trend == "range":
-                C_trend = C_represent.amax() - C_represent.amin()
-                L_trend = L_represent.amax() - L_represent.amin()
-                D_trend = D_represent.amax() - D_represent.amin()
-
-            # C_std = h_record.abs().std((0, 2, 3))
-            # L_std = h_record.abs().std((0, 1, 3))
-            # D_std = h_record.abs().std((0, 1, 2))
-            # C_std = h_record.abs().mean((0, 2, 3)).std()
-            # L_std = h_record.abs().mean((0, 1, 3)).std()
-            # D_std = h_record.abs().mean((0, 1, 2)).std()
-            # C_std = h_record.abs().permute(1, 0, 2, 3).reshape(h_record.shape[1], -1).median(dim=1).values.std()
-            # L_std = h_record.abs().permute(2, 1, 0, 3).reshape(h_record.shape[2], -1).median(dim=1).values.std()
-            # D_std = h_record.abs().permute(3, 1, 2, 0).reshape(h_record.shape[3], -1).median(dim=1).values.std()
+            if self.dispersion == "same":
+                C_disp = 1
+                L_disp = 1
+                D_disp = 1
+            if self.dispersion == "std":
+                C_disp = C_rep.std()
+                L_disp = L_rep.std()
+                D_disp = D_rep.std()
+            if self.dispersion == "var":
+                C_disp = C_rep.var()
+                L_disp = L_rep.var()
+                D_disp = D_rep.var()
+            if self.dispersion == "range":
+                C_disp = C_rep.amax() - C_rep.amin()
+                L_disp = L_rep.amax() - L_rep.amin()
+                D_disp = D_rep.amax() - D_rep.amin()
 
             if self.power == "original":
-                C_power = C_trend
-                L_power = L_trend
-                D_power = D_trend
+                C_power = C_disp
+                L_power = L_disp
+                D_power = D_disp
             if self.power == "normalized":
-                C_power = C_trend / (C_trend + L_trend + D_trend)
-                L_power = L_trend / (C_trend + L_trend + D_trend)
-                D_power = D_trend / (C_trend + L_trend + D_trend)
+                C_power = C_disp / (C_disp + L_disp + D_disp)
+                L_power = L_disp / (C_disp + L_disp + D_disp)
+                D_power = D_disp / (C_disp + L_disp + D_disp)
             if self.power == "ML":
-                C_power, L_power, D_power = ml_power(h_record.abs(), C_represent, L_represent, D_represent)
+                C_power, L_power, D_power = ml_power(h_record.abs(), C_rep, L_rep, D_rep)
 
             if self.factor == "original":
-                self.s_C = (C_represent ** C_power + 1e-15).detach()
-                self.s_L = (L_represent ** L_power + 1e-15).detach()
-                self.s_D = (D_represent ** D_power + 1e-15).detach()
+                self.r_C = (C_rep ** C_power + 1e-15).detach()
+                self.r_L = (L_rep ** L_power + 1e-15).detach()
+                self.r_D = (D_rep ** D_power + 1e-15).detach()
             if self.factor == "ML":
-                self.s_C, self.s_L, self.s_D = ml_decomposition(h_record.abs(), (C_represent ** C_power + 1e-15), (L_represent ** L_power + 1e-15), (D_represent ** D_power + 1e-15))
+                self.r_C, self.r_L, self.r_D = ml_decomposition(h_record.abs(), (C_rep ** C_power + 1e-15), (L_rep ** L_power + 1e-15), (D_rep ** D_power + 1e-15))
 
+            # np.savetxt(f'./r_C/{self.layer_idx}_{self.direction}.txt', self.r_C, fmt='%10.10f')
+            # np.savetxt(f'./r_L/{self.layer_idx}_{self.direction}.txt', self.r_L, fmt='%10.10f')
+            # np.savetxt(f'./r_D/{self.layer_idx}_{self.direction}.txt', self.r_D, fmt='%10.10f')
 
-            # np.savetxt(f'./s_C/{self.layer_idx}_{self.direction}.txt', self.s_C, fmt='%10.10f')
-            # np.savetxt(f'./s_L/{self.layer_idx}_{self.direction}.txt', self.s_L, fmt='%10.10f')
-            # np.savetxt(f'./s_D/{self.layer_idx}_{self.direction}.txt', self.s_D, fmt='%10.10f')
+            # r_C = np.loadtxt(f'./r_C/{self.layer_idx}_{self.direction}.txt', dtype=np.float32)
+            # r_L = np.loadtxt(f'./r_L/{self.layer_idx}_{self.direction}.txt', dtype=np.float32)
+            # r_D = np.loadtxt(f'./r_D/{self.layer_idx}_{self.direction}.txt', dtype=np.float32)
+            # self.r_C = torch.from_numpy(r_C)
+            # self.r_L = torch.from_numpy(r_L)
+            # self.r_D = torch.from_numpy(r_D)
+            # self.r_D = torch.ones(16)
 
-
-            # s_C = np.loadtxt(f'./s_C/{self.layer_idx}_{self.direction}.txt', dtype=np.float32)
-            # s_L = np.loadtxt(f'./s_L/{self.layer_idx}_{self.direction}.txt', dtype=np.float32)
-            # s_D = np.loadtxt(f'./s_D/{self.layer_idx}_{self.direction}.txt', dtype=np.float32)
-            # self.s_C = torch.from_numpy(s_C)
-            # self.s_L = torch.from_numpy(s_L)
-            # self.s_D = torch.from_numpy(s_D)
-            # self.s_D = torch.ones(16)
-
-            self.sA = torch.cat([torch.ones(1).to(self.s_L.device), self.s_L[0:-1]]) / self.s_L
-            self.sB = 1 / (self.s_C.unsqueeze(-1).unsqueeze(-1) * self.s_L.unsqueeze(-1) * self.s_D)
-            self.sC = self.s_D.unsqueeze(-1) * self.s_L
-            self.sY = self.s_C
+            self.sA = torch.cat([torch.ones(1).to(self.r_L.device), self.r_L[0:-1]]) / self.r_L
+            self.sB = 1 / (self.r_C.unsqueeze(-1).unsqueeze(-1) * self.r_L.unsqueeze(-1) * self.r_D)
+            self.sC = self.r_D.unsqueeze(-1) * self.r_L
+            self.sY = self.r_C
 
             deltaA = deltaA * self.sA.unsqueeze(-1).to(deltaA.device)
             deltaB_x = deltaB_x * self.sB.to(deltaB_x.device)
             C = C * self.sC.to(C.device)
             h = 0
 
-        # if self.smooth_quant == 7:
-        #     model = SmoothScaleSelector()
-        #     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
-        #     # optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        #     deltaB_x_max_C = torch.argmax(deltaB_x.abs().amax((0, 3)).cpu(), dim=1) + 197 * torch.arange(0, 384)
-        #     deltaB_x_max_D = torch.argmax(deltaB_x.abs().amax((0, 1)).transpose(0, 1).cpu(), dim=1) + 197 * torch.arange(0, 16)
-        #     s_C_selector_init = torch.nn.functional.one_hot(deltaB_x_max_C, num_classes = 384 * 197) + 1e-15
-        #     s_D_selector_init = torch.nn.functional.one_hot(deltaB_x_max_D, num_classes = 16 * 197) + 1e-15
-        #     for layer in model.modules():
-        #         if isinstance(layer, nn.Linear):
-        #             nn.init.zeros_(layer.bias)
-        #             if layer.weight.data.shape[0] == 384:
-        #                 layer.weight.data = s_C_selector_init
-        #             elif layer.weight.data.shape[0] == 16:
-        #                 layer.weight.data = s_D_selector_init
-
-        #     model.train()
-        #     loss_min = 1e9
-        #     for epoch in range(100):
-        #         loss = self._train(model, optimizer, epoch, x, deltaA, deltaB, C)
-        #         if loss < loss_min:
-        #             loss_min = loss
-        #             torch.save(model.state_dict(), "./checkpoints/selector_model_0.5.pth")
-
-        #     model.load_state_dict(torch.load("./checkpoints/selector_model_0.5.pth"))
-        #     model.eval()
-        #     self.s_C, self.s_D = model(deltaB_x)
-        #     self.s = self.s_C.unsqueeze(-1) * self.s_D
-        #     deltaB_x = deltaB_x / self.s.unsqueeze(1).to(deltaB_x.device)
-        #     C = C * self.s_D.unsqueeze(-1).to(C.device)
-        #     self.smooth_quant = 4
-
-        # if self.smooth_quant == 8:
-        #     h_record = torch.zeros(deltaB_x.shape)
-        #     for i in range(L):
-        #         h, _ = self.ssm_step(h, deltaA, deltaB_x, C, i)
-        #         h_record[:, :, i] = h
-
-        #     model = CLDSelector(h_record)
-
-        #     # if self.layer_idx == 0:
-        #     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-        #     model.train()
-        #     loss_min = 1e9
-        #     for epoch in range(1000):
-        #         loss = self._train_CLD_selector(model, optimizer, epoch, h_record)
-        #         if loss < loss_min:
-        #             loss_min = loss
-        #     #         torch.save(model.state_dict(), "./checkpoints/CLD_selector_model_1.pth")
-
-        #     # model.load_state_dict(torch.load("./checkpoints/CLD_selector_model_1.pth"))
-
-        #     model.eval()
-        #     self.s_C, self.s_L, self.s_D = model()
-
-        #     self.sA = torch.cat([torch.ones(1).to(self.s_L.device), self.s_L[0:-1]]) / self.s_L
-        #     self.sB = 1 / (self.s_C.unsqueeze(-1).unsqueeze(-1) * self.s_L.unsqueeze(-1) * self.s_D)
-        #     self.sC = self.s_D.unsqueeze(-1) * self.s_L
-        #     self.sY = self.s_C
-
-        #     deltaA = deltaA * self.sA.unsqueeze(-1).to(deltaA.device)
-        #     deltaB_x = deltaB_x * self.sB.to(deltaB_x.device)
-        #     C = C * self.sC.to(C.device)
-
-        # if self.smooth_quant == 9:
-        #     h_record = torch.zeros(deltaB_x.shape)
-        #     for i in range(L):
-        #         h, _ = self.ssm_step(h, deltaA, deltaB_x, C, i)
-        #         h_record[:, :, i] = h
-
-        #     h_record = h_record.mean(0)
-        #     # print("mean: ", h_record.abs().mean())
-        #     h_norm = torch.norm(h_record)
-        #     # print("h_norm: ", h_norm)
-        #     # h_record /= h_norm
-        #     k = 1
-
-        #     self.s_C, self.s_L, self.s_D = cp_decomposition(h_record + k, max_iter=100, tol=1e-6)
-        #     self.s_C *= h_norm
-            
-        #     self.sA = torch.cat([torch.ones(1).to(self.s_L.device), self.s_L[0:-1]]) / self.s_L
-        #     self.sB = 1 / (self.s_C.unsqueeze(-1).unsqueeze(-1) * self.s_L.unsqueeze(-1) * self.s_D)
-        #     self.sC = self.s_D.unsqueeze(-1) * self.s_L
-        #     self.sY = self.s_C
-
-        #     deltaA = deltaA * self.sA.unsqueeze(-1).to(deltaA.device)
-        #     deltaB_x = deltaB_x * self.sB.to(deltaB_x.device)
-        #     C = C * self.sC.to(C.device)
-        #     h = 0
-
 
         for i in range(L):
             h, y = self.ssm_step(h, deltaA, deltaB_x, C, i) # B, d_inner, d_state; B, d_inner
-
-            if self.smooth_quant == 1:
-                self.s[i] = (h.abs().amax((0, 2)) + 1e-15).detach()
-                h = h / self.s[i].unsqueeze(-1).to(h.device)
-            if self.smooth_quant == 3:
-                h = h / self.s.to(h.device)
 
             if self.h_config.k_scaled_config.k_scaled:
                 if self.h_config.k_scaled_config.k_scaled_mode == "hidden_dimension_wise":
@@ -460,21 +267,11 @@ class QuantSSM(SequentialSSM):
             else:
                 self.h_config.interval[i] = (h.abs().max() / (self.h_config.qmax - 0.5)).detach()
 
-            if self.smooth_quant == 1:
-                h = h * self.s[i].unsqueeze(-1).to(h.device)
-                # y = y * self.s[i].to(y.device)
-            if self.smooth_quant == 3:
-                h = h * self.s.to(h.device)
-
             ys.append(y)
         y = torch.stack(ys, dim=-1)
 
         # --
-        # if self.smooth_quant == 2:
-        #     y = y * self.s.unsqueeze(-1).to(y.device)
-        # if self.smooth_quant == 4:
-        #     y = y * self.s_C.unsqueeze(-1).to(y.device)
-        # if self.smooth_quant == 5 or self.smooth_quant == 6 or self.smooth_quant == 8 or self.smooth_quant == 9:
+        # if self.reparameterization:
         #     y = y * self.sY.unsqueeze(-1).to(y.device)
 
         # D = D[0]
@@ -485,7 +282,6 @@ class QuantSSM(SequentialSSM):
                 pass
             elif self.o_config.k_scaled_config.k_scaled_mode == "token_wise":
                 out = out.transpose(-2, -1)
-            # self.o_config.k_scaled_config.k_scaled_clusters = self._kmeans(out, self.o_config.k_scaled_config.k, num_iters=100, dim=1)
             self.o_config.k_scaled_config.k_scaled_clusters = kmeans(out, self.o_config.k_scaled_config.k, num_iters=100, dim=1)
             self.o_config.interval = torch.zeros(self.o_config.k_scaled_config.k)
             for cluster_index in range(self.o_config.k_scaled_config.k):
@@ -500,11 +296,11 @@ class QuantSSM(SequentialSSM):
         optimizer.zero_grad()
 
         deltaB_x = deltaB * x.unsqueeze(-1)
-        s_C, s_D = model(deltaB_x)
+        r_C, r_D = model(deltaB_x)
 
-        s = s_C.unsqueeze(-1) * s_D
+        s = r_C.unsqueeze(-1) * r_D
         deltaB_x = deltaB_x / s.unsqueeze(1).to(deltaB_x.device)
-        C = C * s_D.unsqueeze(-1).to(C.device)
+        C = C * r_D.unsqueeze(-1).to(C.device)
         
         L = x.shape[2]
         h = 0
@@ -527,8 +323,8 @@ class QuantSSM(SequentialSSM):
             ys = torch.cat((ys, y.unsqueeze(-1).to(ys.device)), -1)
             ys_sim = torch.cat((ys_sim, y_sim.unsqueeze(-1).to(ys_sim.device)), -1)
         
-        y = ys * s_C.unsqueeze(-1).to(ys.device)
-        y_sim = ys_sim * s_C.unsqueeze(-1).to(ys_sim.device)
+        y = ys * r_C.unsqueeze(-1).to(ys.device)
+        y_sim = ys_sim * r_C.unsqueeze(-1).to(ys_sim.device)
 
         loss_fn = nn.MSELoss()
         loss = loss_fn(y, y_sim)
@@ -544,8 +340,8 @@ class QuantSSM(SequentialSSM):
         torch.set_grad_enabled(True)
         torch.autograd.set_detect_anomaly(True)
         optimizer.zero_grad()
-        s_C, s_L, s_D = model()
-        h_sim = s_C.unsqueeze(-1).unsqueeze(-1) * s_L.unsqueeze(-1) * s_D
+        r_C, r_L, r_D = model()
+        h_sim = r_C.unsqueeze(-1).unsqueeze(-1) * r_L.unsqueeze(-1) * r_D
         loss_fn = nn.MSELoss()
         loss = loss_fn(h_record, h_sim)
         loss.backward()
@@ -565,12 +361,7 @@ class QuantSSM(SequentialSSM):
         h = 0
         h_sim = 0
 
-        if self.smooth_quant == 4:
-            deltaB_x = deltaB_x / self.s.unsqueeze(1).to(deltaB_x.device)
-            deltaB_x_sim = deltaB_x_sim / self.s.unsqueeze(1).to(deltaB_x_sim.device)
-            C = C * self.s_D.unsqueeze(-1).to(C.device)
-            C_sim = C_sim * self.s_D.unsqueeze(-1).to(C_sim.device)
-        if self.smooth_quant == 5 or self.smooth_quant == 6 or self.smooth_quant == 8 or self.smooth_quant == 9:
+        if self.reparameterization:
             deltaA = deltaA * self.sA.unsqueeze(-1).to(deltaA.device)
             deltaA_sim = deltaA_sim * self.sA.unsqueeze(-1).to(deltaA_sim.device)
             deltaB_x = deltaB_x * self.sB.to(deltaB_x.device)
@@ -643,18 +434,10 @@ class QuantSSM(SequentialSSM):
     def _search_best_o_interval(self, x, deltaA, deltaB, C, D, output_interval_candidates):
         L = x.shape[2]
 
-        if self.smooth_quant == 4:
-            deltaB = deltaB / self.s.unsqueeze(1).to(deltaB.device)
-            # deltaB_x_sim = deltaB_x_sim / self.s.unsqueeze(1).to(deltaB_x_sim.device)
-            C = C * self.s_D.unsqueeze(-1).to(C.device)
-            # C_sim = C_sim * self.s_D.unsqueeze(-1).to(C_sim.device)
-        if self.smooth_quant == 5 or self.smooth_quant == 6 or self.smooth_quant == 8 or self.smooth_quant == 9:
+        if self.reparameterization:
             deltaA = deltaA * self.sA.unsqueeze(-1).to(deltaA.device)
-            # deltaA_sim = deltaA_sim * self.sA.unsqueeze(-1).to(deltaA_sim.device)
             deltaB = deltaB * self.sB.to(deltaB.device)
-            # deltaB_x_sim = deltaB_x_sim * self.sB.to(deltaB_x_sim.device)
             C = C * self.sC.to(C.device)
-            # C_sim = C_sim * self.sC.to(C_sim.device
         
         # quantize weight
         D_sim = self.quant_weight(D)
@@ -675,9 +458,7 @@ class QuantSSM(SequentialSSM):
         y_sim = torch.stack(ys_sim, dim=-1)
 
         # --
-        # if self.smooth_quant == 4:
-        #     y_sim = y_sim * self.s_C.unsqueeze(-1).to(y_sim.device)
-        # if self.smooth_quant == 5 or self.smooth_quant == 6 or self.smooth_quant == 8 or self.smooth_quant == 9:
+        # if self.reparameterization:
         #     y_sim = y_sim * self.sY.unsqueeze(-1).to(y_sim.device)
         
         # out = y_sim + x_sim * D_sim.unsqueeze(-1) # B, d_inner, L # --
@@ -698,9 +479,7 @@ class QuantSSM(SequentialSSM):
                         out = out.transpose(-2, -1)
                         out_sim = out_sim.transpose(-3, -1)
                     # ++
-                    if self.smooth_quant == 4:
-                        out_sim = out_sim * self.s_C.to(out_sim.device)
-                    if self.smooth_quant == 5 or self.smooth_quant == 6 or self.smooth_quant == 8 or self.smooth_quant == 9:
+                    if self.reparameterization:
                         out_sim = out_sim * self.sY.to(out_sim.device)
                     similarity = self._get_similarity(self.raw_out.transpose(1, 2).unsqueeze(-2), out_sim, self.o_config.similarity_config.metric)
                     similarity = torch.mean(similarity, dim=(0, 1))
@@ -722,9 +501,7 @@ class QuantSSM(SequentialSSM):
                 # quantize output
                 out_sim = (out / cur_o_interval).round_().clamp_(-self.o_config.qmax, self.o_config.qmax-1) * cur_o_interval # parallel_eq_n, B, d_inner, L
                 # ++
-                if self.smooth_quant == 4:
-                    out_sim = out_sim * self.s_C.unsqueeze(-1).to(out_sim.device)
-                if self.smooth_quant == 5 or self.smooth_quant == 6 or self.smooth_quant == 8 or self.smooth_quant == 9:
+                if self.reparameterization:
                     out_sim = out_sim * self.sY.unsqueeze(-1).to(out_sim.device)
                 # calculate similarity and store them
                 similarity = self._get_similarity(self.raw_out.unsqueeze(0).transpose(2, 3), out_sim.transpose(2, 3), self.o_config.similarity_config.metric) # parallel_eq_n, B, L
@@ -771,9 +548,6 @@ class QuantSSM(SequentialSSM):
         if not self.h_config.quant:
             return h
 
-        # if i % 32 != 0:
-        #     return h
-
         h_sim = h
         cur_h_interval = self.h_config.interval[i]
         if self.h_config.k_scaled_config.k_scaled:
@@ -813,15 +587,7 @@ class QuantSSM(SequentialSSM):
         assert self.calibrated is not None,f"You should run calibrate_forward before run quant_forward for {self}"
         D_sim = self.quant_weight(D)
 
-        if self.smooth_quant == 1:
-            deltaA = deltaA / self.s.transpose(0, 1).unsqueeze(-1).to(deltaA.device)
-            deltaB = deltaB / self.s.transpose(0, 1).unsqueeze(-1).to(deltaB.device)
-        if self.smooth_quant == 2:
-            deltaB = deltaB / self.s.unsqueeze(-1).unsqueeze(-1).to(deltaB.device)
-        if self.smooth_quant == 4:
-            deltaB = deltaB / self.s.unsqueeze(1).to(deltaB.device)
-            C = C * self.s_D.unsqueeze(-1).to(C.device)
-        if self.smooth_quant == 5 or self.smooth_quant == 6 or self.smooth_quant == 8 or self.smooth_quant == 9:
+        if self.reparameterization:
             deltaA = deltaA * self.sA.unsqueeze(-1).to(deltaA.device)
             deltaB = deltaB * self.sB.to(deltaB.device)
             C = C * self.sC.to(C.device)
@@ -833,28 +599,13 @@ class QuantSSM(SequentialSSM):
         ys = []
         for i in range(L):
             h, y = self.ssm_step(h_sim, deltaA_sim, deltaB_x_sim, C_sim, i)
-
-            if self.smooth_quant == 3:
-                h = h / self.s.to(h.device)
-
             h_sim = self.quant_hidden(h, i)
-
-            if self.smooth_quant == 1:
-                h_sim = h_sim * self.s[i].unsqueeze(-1).to(h_sim.device)
-                y = y * self.s[i].to(y.device)
-            if self.smooth_quant == 3:
-                h_sim = h_sim * self.s.to(h_sim.device)
-
             ys.append(y)
         y = torch.stack(ys, dim=-1)
 
         y = self.quant_output(y) # ++
 
-        if self.smooth_quant == 2:
-            y = y * self.s.unsqueeze(-1).to(y.device)
-        if self.smooth_quant == 4:
-            y = y * self.s_C.unsqueeze(-1).to(y.device)
-        if self.smooth_quant == 5 or self.smooth_quant == 6 or self.smooth_quant == 8 or self.smooth_quant == 9:
+        if self.reparameterization:
             y = y * self.sY.unsqueeze(-1).to(y.device)
         
         # --

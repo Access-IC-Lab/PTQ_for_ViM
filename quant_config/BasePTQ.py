@@ -127,16 +127,7 @@ def get_module(module_type, *args, **kwargs):
     if module_type == "qssm":
         ssm_kwargs = {
             "search_round": 3,
-            "smooth_quant": 0,
-            # 0: no smooth quant
-            # 1: method 1
-            # 2: method 2
-            # 3: method 3
-            # 4: method 4
-            # 5: method 5
-            # 6: method 5 with h_record initialization
-            # 7: method 4 with trainable scale
-            # 8: method 6 with trainable scale
+            "reparameterization": True,
             "w_config": QuantConfig(
                 quant = False,
                 qmode = "minmax",
