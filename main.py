@@ -26,11 +26,8 @@ import mlflow
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
+    parser = argparse.ArgumentParser('Evaluation script', add_help=False)
     parser.add_argument('--batch-size', default=64, type=int)
-    parser.add_argument('--epochs', default=300, type=int)
-    parser.add_argument('--bce-loss', action='store_true')
-    parser.add_argument('--unscale-lr', action='store_true')
 
     # Model parameters
     parser.add_argument('--model', default='deit_base_patch16_224', type=str, metavar='MODEL',
@@ -48,19 +45,18 @@ def get_args_parser():
     parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME',
                         help='Use AutoAugment policy. "v0" or "original". " + \
                              "(default: rand-m9-mstd0.5-inc1)'),
-    parser.add_argument('--smoothing', type=float, default=0.1, help='Label smoothing (default: 0.1)')
     parser.add_argument('--train-interpolation', type=str, default='bicubic',
                         help='Training interpolation (random, bilinear, bicubic default: "bicubic")')
 
-    parser.add_argument('--repeated-aug', action='store_true')
-    parser.add_argument('--no-repeated-aug', action='store_false', dest='repeated_aug')
-    parser.set_defaults(repeated_aug=True)
+    # parser.add_argument('--repeated-aug', action='store_true')
+    # parser.add_argument('--no-repeated-aug', action='store_false', dest='repeated_aug')
+    # parser.set_defaults(repeated_aug=True)
     
-    parser.add_argument('--train-mode', action='store_true')
-    parser.add_argument('--no-train-mode', action='store_false', dest='train_mode')
-    parser.set_defaults(train_mode=True)
+    # parser.add_argument('--train-mode', action='store_true')
+    # parser.add_argument('--no-train-mode', action='store_false', dest='train_mode')
+    # parser.set_defaults(train_mode=True)
     
-    parser.add_argument('--ThreeAugment', action='store_true') #3augment
+    # parser.add_argument('--ThreeAugment', action='store_true') #3augment
     
     parser.add_argument('--src', action='store_true') #simple random crop
     
@@ -71,11 +67,11 @@ def get_args_parser():
                         help='Random erase mode (default: "pixel")')
     parser.add_argument('--recount', type=int, default=1,
                         help='Random erase count (default: 1)')
-    parser.add_argument('--resplit', action='store_true', default=False,
-                        help='Do not random erase first (clean) augmentation split')
+    # parser.add_argument('--resplit', action='store_true', default=False,
+    #                     help='Do not random erase first (clean) augmentation split')
     
-    # * Cosub params
-    parser.add_argument('--cosub', action='store_true') 
+    # # * Cosub params
+    # parser.add_argument('--cosub', action='store_true') 
 
     
     # Dataset parameters
@@ -93,8 +89,8 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='', help='resume from checkpoint')
-    parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
-                        help='start epoch')
+    # parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
+    #                     help='start epoch')
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
     parser.add_argument('--eval-crop-ratio', default=0.875, type=float, help="Crop ratio for evaluation")
     # parser.add_argument('--dist-eval', action='store_true', default=False, help='Enabling distributed evaluation')
@@ -105,25 +101,25 @@ def get_args_parser():
                         help='')
     parser.set_defaults(pin_mem=True)
 
-    # if continue with inf
-    parser.add_argument('--if_continue_inf', action='store_true')
-    parser.add_argument('--no_continue_inf', action='store_false', dest='if_continue_inf')
-    parser.set_defaults(if_continue_inf=False)
+    # # if continue with inf
+    # parser.add_argument('--if_continue_inf', action='store_true')
+    # parser.add_argument('--no_continue_inf', action='store_false', dest='if_continue_inf')
+    # parser.set_defaults(if_continue_inf=False)
 
-    # if use nan to num
-    parser.add_argument('--if_nan2num', action='store_true')
-    parser.add_argument('--no_nan2num', action='store_false', dest='if_nan2num')
-    parser.set_defaults(if_nan2num=False)
+    # # if use nan to num
+    # parser.add_argument('--if_nan2num', action='store_true')
+    # parser.add_argument('--no_nan2num', action='store_false', dest='if_nan2num')
+    # parser.set_defaults(if_nan2num=False)
 
-    # if use random token position
-    parser.add_argument('--if_random_cls_token_position', action='store_true')
-    parser.add_argument('--no_random_cls_token_position', action='store_false', dest='if_random_cls_token_position')
-    parser.set_defaults(if_random_cls_token_position=False)    
+    # # if use random token position
+    # parser.add_argument('--if_random_cls_token_position', action='store_true')
+    # parser.add_argument('--no_random_cls_token_position', action='store_false', dest='if_random_cls_token_position')
+    # parser.set_defaults(if_random_cls_token_position=False)    
 
-    # if use random token rank
-    parser.add_argument('--if_random_token_rank', action='store_true')
-    parser.add_argument('--no_random_token_rank', action='store_false', dest='if_random_token_rank')
-    parser.set_defaults(if_random_token_rank=False)
+    # # if use random token rank
+    # parser.add_argument('--if_random_token_rank', action='store_true')
+    # parser.add_argument('--no_random_token_rank', action='store_false', dest='if_random_token_rank')
+    # parser.set_defaults(if_random_token_rank=False)
 
     parser.add_argument('--local-rank', default=0, type=int)
     parser.add_argument('--gpu', default=0, type=int)
@@ -137,7 +133,7 @@ def get_args_parser():
 
 
 def main(args):
-    utils.init_distributed_mode(args)
+    # utils.init_distributed_mode(args)
 
     print(args)
 
@@ -209,26 +205,11 @@ def main(args):
 
     if args.resume:
         checkpoint = torch.load(args.resume, map_location='cpu')
-        # checkpoint['model']['patch_embed.proj.weight'] = MinMaxWeightQuantization(checkpoint['model']['patch_embed.proj.weight'])
-        # checkpoint['model']['patch_embed.proj.bias'] = MinMaxWeightQuantization(checkpoint['model']['patch_embed.proj.bias'])
-        # for i in range(24):
-        #     checkpoint['model'][f'layers.{i}.mixer.conv1d.weight'] = MinMaxWeightQuantization(checkpoint['model'][f'layers.{i}.mixer.conv1d.weight'])
-        #     checkpoint['model'][f'layers.{i}.mixer.conv1d.bias'] = MinMaxWeightQuantization(checkpoint['model'][f'layers.{i}.mixer.conv1d.bias'])
-        #     checkpoint['model'][f'layers.{i}.mixer.conv1d_b.weight'] = MinMaxWeightQuantization(checkpoint['model'][f'layers.{i}.mixer.conv1d_b.weight'])
-        #     checkpoint['model'][f'layers.{i}.mixer.conv1d_b.bias'] = MinMaxWeightQuantization(checkpoint['model'][f'layers.{i}.mixer.conv1d_b.bias'])
-        
-        # counter = 0
-        # for key in list(checkpoint['model'].keys()):
-        #     if 'weight' in key or 'bias' in key:
-        #         checkpoint['model'][key] = MinMaxWeightQuantization(checkpoint['model'][key])
-        #         counter = counter + 1
 
         model.load_state_dict(checkpoint['model'])
 
-    ##################################
-    ### Calibration & Quantization ###
-    ##################################
 
+    # Calibration & Quantization
     inds=np.random.permutation(len(dataset_calib))[:args.calibration_size]
     dataset_calib = torch.utils.data.Subset(copy.deepcopy(dataset_calib), inds)
     data_loader_calib = torch.utils.data.DataLoader(
@@ -240,30 +221,20 @@ def main(args):
         shuffle=True,
     )
 
-    from quantization import quantization
-
     if args.quantization:
+        from quantization import quantization
         model = quantization(model, data_loader_calib, config=args.quantization_config)
 
-    # exit()
 
-    ##################################
-    ##################################
-    ##################################
-
+    # Evaluation
     if args.eval:
         test_stats = evaluate(data_loader_val, model, device, amp_autocast)
         # test_stats = evaluate(data_loader_calib, model, device, amp_autocast)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         return
-    
-# def MinMaxWeightQuantization(weight, bits=8):
-#     maximum = torch.max(torch.abs(weight))
-#     quant_weight = torch.round(weight / maximum * (2 ** (bits - 1) - 1)) * maximum / (2 ** (bits - 1) - 1)
-#     return quant_weight
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])
+    parser = argparse.ArgumentParser('Evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)

@@ -1,12 +1,8 @@
 import torch
-from quant_layers.conv2d import MinMaxQuantConv2d
-from quant_layers.conv1d import MinMaxQuantConv1d
-from quant_layers.linear import MinMaxQuantLinear
-from quant_layers.QuantLinear import QuantLinear
-from quant_layers.QuantConv1d import QuantConv1d
-from quant_layers.QuantSSM import QuantSSM
-# from quant_layers.matmul import MinMaxQuantMatMul, PTQSLQuantMatMul
-# import torch.nn.functional as F
+from quant_layer.QuantConv1d import QuantConv1d
+from quant_layer.QuantConv2d import QuantConv2d
+from quant_layer.QuantLinear import QuantLinear
+from quant_layer.QuantSSM import QuantSSM
 from tqdm import tqdm
 import torch.nn.functional as F
 
@@ -83,11 +79,11 @@ class QuantCalibrator():
             else:
                 module.mode=f"calibration_step2"
                 with torch.no_grad():
-                    if isinstance(module, MinMaxQuantLinear) or isinstance(module, QuantLinear):
+                    if isinstance(module, QuantLinear):
                         module.forward(module.raw_input.cuda())
-                    elif isinstance(module, MinMaxQuantConv2d):
+                    elif isinstance(module, QuantConv2d):
                         module.forward(module.raw_input.cuda())
-                    elif isinstance(module, MinMaxQuantConv1d) or isinstance(module, QuantConv1d):
+                    elif isinstance(module, QuantConv1d):
                         module.forward(module.raw_input.cuda())
                     elif isinstance(module, QuantSSM):
                         module.forward(module.raw_input[0].cuda(), module.raw_input[1].cuda(), module.raw_input[2].cuda(), module.raw_input[3].cuda(), module.raw_input[4].cuda())
@@ -128,11 +124,11 @@ class QuantCalibrator():
             # add fp and bp hooks to current modules, which bypass calibration step 1
             # precedent modules are using quant forward
             hooks = []
-            if isinstance(module, MinMaxQuantLinear) or isinstance(module, QuantLinear):
+            if isinstance(module, QuantLinear):
                 hooks.append(module.register_forward_hook(linear_forward_hook))
-            if isinstance(module, MinMaxQuantConv2d):
+            if isinstance(module, QuantConv2d):
                 hooks.append(module.register_forward_hook(conv2d_forward_hook))
-            if isinstance(module, MinMaxQuantConv1d) or isinstance(module, QuantConv1d):
+            if isinstance(module, QuantConv1d):
                 hooks.append(module.register_forward_hook(conv1d_forward_hook))
             if isinstance(module, QuantSSM):
                 hooks.append(module.register_forward_hook(ssm_forward_hook))
@@ -149,13 +145,13 @@ class QuantCalibrator():
                 torch.cuda.empty_cache()
             
             # replace cached raw_inputs, raw_outs
-            if isinstance(module, MinMaxQuantLinear) or isinstance(module, QuantLinear):
+            if isinstance(module, QuantLinear):
                 module.raw_input = torch.cat(module.raw_input, dim=0)
                 module.raw_out = torch.cat(module.raw_out, dim=0)
-            if isinstance(module, MinMaxQuantConv2d):
+            if isinstance(module, QuantConv2d):
                 module.raw_input = torch.cat(module.raw_input, dim=0)
                 module.raw_out = torch.cat(module.raw_out, dim=0)
-            if isinstance(module, MinMaxQuantConv1d) or isinstance(module, QuantConv1d):
+            if isinstance(module, QuantConv1d):
                 module.raw_input = torch.cat(module.raw_input, dim=0)
                 module.raw_out = torch.cat(module.raw_out, dim=0)
             if isinstance(module, QuantSSM):
@@ -169,11 +165,11 @@ class QuantCalibrator():
 
             # run calibration step2
             with torch.no_grad():
-                if isinstance(module, MinMaxQuantLinear) or isinstance(module, QuantLinear):
+                if isinstance(module, QuantLinear):
                     module.calibration_step2(module.raw_input.cuda())
-                if isinstance(module, MinMaxQuantConv2d):
+                if isinstance(module, QuantConv2d):
                     module.calibration_step2(module.raw_input.cuda())
-                if isinstance(module, MinMaxQuantConv1d) or isinstance(module, QuantConv1d):
+                if isinstance(module, QuantConv1d):
                     module.calibration_step2(module.raw_input.cuda())
                 if isinstance(module, QuantSSM):
                     module.calibration_step2(module.raw_input[0].cuda(), module.raw_input[1].cuda(), module.raw_input[2].cuda(), module.raw_input[3].cuda(), module.raw_input[4].cuda())
@@ -283,11 +279,11 @@ class HessianQuantCalibrator(QuantCalibrator):
             # add fp and bp hooks to current modules, which bypass calibration step 1
             # precedent modules are using quant forward
             hooks = []
-            if isinstance(module, MinMaxQuantLinear) or isinstance(module, QuantLinear):
+            if isinstance(module, QuantLinear):
                 hooks.append(module.register_forward_hook(linear_forward_hook))
-            if isinstance(module, MinMaxQuantConv2d):
+            if isinstance(module, QuantConv2d):
                 hooks.append(module.register_forward_hook(conv2d_forward_hook))
-            if isinstance(module, MinMaxQuantConv1d) or isinstance(module, QuantConv1d):
+            if isinstance(module, QuantConv1d):
                 hooks.append(module.register_forward_hook(conv1d_forward_hook))
             if isinstance(module, QuantSSM):
                 hooks.append(module.register_forward_hook(ssm_forward_hook))
@@ -308,13 +304,13 @@ class HessianQuantCalibrator(QuantCalibrator):
                 torch.cuda.empty_cache()
             
             # replace cached raw_inputs, raw_outs
-            if isinstance(module, MinMaxQuantLinear) or isinstance(module, QuantLinear):
+            if isinstance(module, QuantLinear):
                 module.raw_input = torch.cat(module.raw_input, dim=0)
                 module.raw_out = torch.cat(module.raw_out, dim=0)
-            if isinstance(module, MinMaxQuantConv2d):
+            if isinstance(module, QuantConv2d):
                 module.raw_input = torch.cat(module.raw_input, dim=0)
                 module.raw_out = torch.cat(module.raw_out, dim=0)
-            if isinstance(module, MinMaxQuantConv1d) or isinstance(module, QuantConv1d):
+            if isinstance(module, QuantConv1d):
                 module.raw_input = torch.cat(module.raw_input, dim=0)
                 module.raw_out = torch.cat(module.raw_out, dim=0)
             if isinstance(module, QuantSSM):
@@ -330,11 +326,11 @@ class HessianQuantCalibrator(QuantCalibrator):
 
             # run calibration step2
             with torch.no_grad():
-                if isinstance(module, MinMaxQuantLinear) or isinstance(module, QuantLinear):
+                if isinstance(module, QuantLinear):
                     module.calibration_step2(module.raw_input.cuda())
-                if isinstance(module, MinMaxQuantConv2d):
+                if isinstance(module, QuantConv2d):
                     module.calibration_step2(module.raw_input.cuda())
-                if isinstance(module, MinMaxQuantConv1d) or isinstance(module, QuantConv1d):
+                if isinstance(module, QuantConv1d):
                     module.calibration_step2(module.raw_input.cuda())
                 if isinstance(module, QuantSSM):
                     module.calibration_step2(module.raw_input[0].cuda(), module.raw_input[1].cuda(), module.raw_input[2].cuda(), module.raw_input[3].cuda(), module.raw_input[4].cuda())
@@ -377,11 +373,11 @@ class HessianQuantCalibrator(QuantCalibrator):
             # add fp and bp hooks to current modules, which bypass calibration step 1
             # precedent modules are using quant forward
             hooks = []
-            if isinstance(module, MinMaxQuantLinear) or isinstance(module, QuantLinear):
+            if isinstance(module, QuantLinear):
                 hooks.append(module.register_forward_hook(linear_forward_hook))
-            if isinstance(module, MinMaxQuantConv2d):
+            if isinstance(module, QuantConv2d):
                 hooks.append(module.register_forward_hook(conv2d_forward_hook))
-            if isinstance(module, MinMaxQuantConv1d) or isinstance(module, QuantConv1d):
+            if isinstance(module, QuantConv1d):
                 hooks.append(module.register_forward_hook(conv1d_forward_hook))
             if isinstance(module, QuantSSM):
                 hooks.append(module.register_forward_hook(ssm_forward_hook))
@@ -402,13 +398,13 @@ class HessianQuantCalibrator(QuantCalibrator):
                 torch.cuda.empty_cache()
             
             # replace cached raw_inputs, raw_outs
-            if isinstance(module, MinMaxQuantLinear) or isinstance(module, QuantLinear):
+            if isinstance(module, QuantLinear):
                 module.raw_input = torch.cat(module.raw_input, dim=0)
                 module.raw_out = torch.cat(module.raw_out, dim=0)
-            if isinstance(module, MinMaxQuantConv2d):
+            if isinstance(module, QuantConv2d):
                 module.raw_input = torch.cat(module.raw_input, dim=0)
                 module.raw_out = torch.cat(module.raw_out, dim=0)
-            if isinstance(module, MinMaxQuantConv1d) or isinstance(module, QuantConv1d):
+            if isinstance(module, QuantConv1d):
                 module.raw_input = torch.cat(module.raw_input, dim=0)
                 module.raw_out = torch.cat(module.raw_out, dim=0)
             if isinstance(module, QuantSSM):
@@ -424,11 +420,11 @@ class HessianQuantCalibrator(QuantCalibrator):
 
             # run calibration step2
             with torch.no_grad():
-                if isinstance(module, MinMaxQuantLinear) or isinstance(module, QuantLinear):
+                if isinstance(module, QuantLinear):
                     module.calibration_step2(module.raw_input.cuda())
-                if isinstance(module, MinMaxQuantConv2d):
+                if isinstance(module, QuantConv2d):
                     module.calibration_step2(module.raw_input.cuda())
-                if isinstance(module, MinMaxQuantConv1d) or isinstance(module, QuantConv1d):
+                if isinstance(module, QuantConv1d):
                     module.calibration_step2(module.raw_input.cuda())
                 if isinstance(module, QuantSSM):
                     module.calibration_step2(module.raw_input[0].cuda(), module.raw_input[1].cuda(), module.raw_input[2].cuda(), module.raw_input[3].cuda(), module.raw_input[4].cuda())

@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1 python print_model.py --model vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 --device cuda --batch-size 1 --resume "/home/common/SharedModelWeight/Mamba/vim_t_midclstok_76p1acc.pth" --print-mode model

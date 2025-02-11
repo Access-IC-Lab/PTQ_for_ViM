@@ -10,7 +10,7 @@ from torch import Tensor
 
 from einops import rearrange, repeat, einsum
 # import matplotlib.pyplot as plt
-from plot import *
+# from plot import *
 from ssm import SequentialSSM
 
 class Mamba(nn.Module):
@@ -96,28 +96,6 @@ class Mamba(nn.Module):
         self.ssm_b = SequentialSSM(self.layer_idx, "b")
         
         self.out_proj = nn.Linear(self.d_inner, self.d_model, bias=bias, **factory_kwargs)
-
-
-        # # Initialize special dt projection to preserve variance at initialization
-        # dt_init_std = self.dt_rank**-0.5 * dt_scale
-        # if dt_init == "constant":
-        #     nn.init.constant_(self.dt_proj.weight, dt_init_std)
-        # elif dt_init == "random":
-        #     nn.init.uniform_(self.dt_proj.weight, -dt_init_std, dt_init_std)
-        # else:
-        #     raise NotImplementedError
-
-        # # Initialize dt bias so that F.softplus(dt_bias) is between dt_min and dt_max
-        # dt = torch.exp(
-        #     torch.rand(self.d_inner, **factory_kwargs) * (math.log(dt_max) - math.log(dt_min))
-        #     + math.log(dt_min)
-        # ).clamp(min=dt_init_floor)
-        # # Inverse of softplus: https://github.com/pytorch/pytorch/issues/72759
-        # inv_dt = dt + torch.log(-torch.expm1(-dt))
-        # with torch.no_grad():
-        #     self.dt_proj.bias.copy_(inv_dt)
-        # # Our initialization would set all Linear.bias to zero, need to mark this one as _no_reinit
-        # self.dt_proj.bias._no_reinit = True
 
         # S4D real initialization
         A = repeat(
@@ -218,22 +196,6 @@ class Mamba(nn.Module):
         out = (y + y_b.flip([1])) / 2 # B,L,d_inner = B,197,384
         out = self.out_proj(out) # B,L,D = B,197,192
 
-
-        # if self.layer_idx == 19:
-        #     plt.figure(figsize=(6, 3))
-        #     # plt.figure()
-        #     plt.plot(out.amax((0, 2)).cpu().detach().numpy())
-        #     plt.plot(out.amin((0, 2)).cpu().detach().numpy())
-        #     plt.xlabel("Token Index")
-        #     plt.ylabel("Value")
-        #     plt.legend(["Max Value", "Min Value"])
-        #     plt.tight_layout()
-        #     plt.savefig("figures/out_proj.png")
-        #     plt.close()
-
-        #     exit()
-
-
         return out
     
     def selective_scan(self, x, delta, A, B, C, D=None, direction='f'):
@@ -260,31 +222,6 @@ class Mamba(nn.Module):
             out = self.ssm(x, deltaA, deltaB, C, D)
         elif direction == 'b':
             out = self.ssm_b(x, deltaA, deltaB, C, D)
-
-        # deltaB_x = deltaB * x_expanded
-
-        # ys = []
-        # for i in range(seqlen):
-        #     if i == 0:
-        #         h = deltaB_x[:, :, i] # B,d_inner,d_state = B,384,16
-        #     else:
-        #         h = deltaA[:, :, i] * h + deltaB_x[:, :, i] # B,d_inner,d_state = B,384,16
-
-            
-        #     # h_sim = (h / h.abs().max() * (q - 1)).round().clamp(-q, (q - 1)) * h.abs().max() / (q - 1)
-        #     # h_sim = (h / h.abs().amax((0, 1)) * (q - 1)).round_().clamp_(-q, (q - 1)) * h.abs().amax((0, 1)) / (q - 1)
-        #     # h = h_sim
-
-        #     # y = torch.einsum('bdn,bn->bd', h, C[:, :, i]) # B,d_inner = B,384
-        #     y = torch.matmul(h, C[:, :, i].unsqueeze(-1)).squeeze(-1) # B,d_inner = B,384
-        #     ys.append(y) # B,d_inner = B,384
-
-        # y = torch.stack(ys, dim=2) # B,d_inner,L = B,384,197
-
-        # # y_sim = (y / y.abs().max() * (q - 1)).round_().clamp_(-q, (q - 1)) * y.abs().max() / (q - 1) 
-        # # y = y_sim
-
-        # out = y + x * rearrange(D, "d -> d 1")
 
         return out
 

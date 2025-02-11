@@ -330,22 +330,6 @@ class VisionMamba(nn.Module):
 
         return x
 
-# def layer_norm_fn(x, weight, bias, residual=None, eps=1e-6, prenorm=False, upcast=False):
-#     dtype = x.dtype
-#     if upcast:
-#         weight = weight.float()
-#         bias = bias.float() if bias is not None else None
-#     if upcast:
-#         x = x.float()
-#         residual = residual.float() if residual is not None else residual
-#     if residual is not None:
-#         x = (x + residual).to(x.dtype)
-#     out = F.layer_norm(x.to(weight.dtype), x.shape[-1:], weight=weight, bias=bias, eps=eps).to(
-#         dtype
-#     )
-#     return out if not prenorm else (out, x)
-
-
 def rms_norm(x, weight, bias, residual=None, eps=1e-6, prenorm=False, residual_in_fp32=False, upcast=False):
     dtype = x.dtype
     if upcast:

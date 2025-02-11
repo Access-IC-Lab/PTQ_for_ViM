@@ -104,24 +104,6 @@ def build_transform(is_train, args):
         )
         t.append(transforms.CenterCrop(args.input_size))
 
-    # test
-    # t.append(transforms.RandomRotation((90, 90)))
-    # t.append(custom_transform())
-
     t.append(transforms.ToTensor())
     t.append(transforms.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD))
     return transforms.Compose(t)
-
-# test
-# class custom_transform(object):
-#     def __init__(self):
-#         pass
-
-#     def __call__(self, img):
-#         h, w = img.size[0], img.size[1]
-#         patch_h = h / 14
-#         patch_w = w / 14
-#         for i in range(7):
-#             for j in range(7):
-#                 img[(2 * i + 1) * patch_h : ((2 * i + 1) + 1) * patch_h, (2 * j + 1) * patch_w : ((2 * j + 1) + 1) * patch_w] = img[(2 * i) * patch_h : ((2 * i) + 1) * patch_h, (2 * j) * patch_w : ((2 * j) + 1) * patch_w]
-#         return img
