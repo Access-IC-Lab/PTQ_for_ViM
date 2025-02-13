@@ -1,1 +1,0 @@
-CUDA_VISIBLE_DEVICES=3 python intermediate_weight.py --resume "/home/common/SharedModelWeight/Mamba/vim_t_midclstok_76p1acc.pth" --layer conv1d.weight
