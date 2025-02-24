@@ -6,11 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 class SequentialSSM(nn.Module):
-    def __init__(
-        self,
-        layer_idx,
-        direction,
-    ):
+    def __init__(self, layer_idx, direction):
         super().__init__()
         self.layer_idx = layer_idx
         self.direction = direction
@@ -34,18 +30,13 @@ class SequentialSSM(nn.Module):
 
         deltaB_x = deltaB * x.unsqueeze(-1) # B, d_inner, L, d_state
         h = 0
-        h_sim = 0
 
         ys = []
         for i in range(L):
 
             h, y = self.ssm_step(h, deltaA, deltaB_x, C, i)
-            s = h.abs().max() / 127 + 1e-15
-            h_sim = (h_sim / s).round_().clamp_(-128, 127).mul_(s)
 
             ys.append(y)
-        
-
 
         y = torch.stack(ys, dim=-1) # B, d_inner, L
 

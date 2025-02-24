@@ -9,8 +9,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from einops import rearrange, repeat, einsum
-# import matplotlib.pyplot as plt
-# from plot import *
+from plot import *
 from ssm import SequentialSSM
 
 class Mamba(nn.Module):
@@ -32,9 +31,6 @@ class Mamba(nn.Module):
         layer_idx=None,
         device=None,
         dtype=None,
-        bimamba_type="none",
-        if_devide_out=False,
-        init_layer_scale=None,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -46,13 +42,6 @@ class Mamba(nn.Module):
         self.dt_rank = math.ceil(self.d_model / 16) if dt_rank == "auto" else dt_rank
         self.use_fast_path = use_fast_path
         self.layer_idx = layer_idx
-        self.bimamba_type = bimamba_type
-        self.if_devide_out = if_devide_out
-
-        self.init_layer_scale = init_layer_scale
-        if init_layer_scale is not None:
-            self.gamma = nn.Parameter(init_layer_scale * torch.ones((d_model)), requires_grad=True)
-
 
         self.in_proj = nn.Linear(self.d_model, self.d_inner * 2, bias=bias, **factory_kwargs)
 
@@ -76,10 +65,9 @@ class Mamba(nn.Module):
             **factory_kwargs,
         )
 
-        self.activation = "silu"
         self.act = nn.SiLU()
-        # self.act = nn.ReLU()
-        # self.act = nn.GELU()
+        self.act_b = nn.SiLU()
+        self.act_z = nn.SiLU()
 
         self.x_proj = nn.Linear(self.d_inner, self.dt_rank + self.d_state * 2, bias=False, **factory_kwargs)
         self.x_proj_b = nn.Linear(self.d_inner, self.dt_rank + self.d_state * 2, bias=False, **factory_kwargs)
@@ -87,8 +75,9 @@ class Mamba(nn.Module):
         self.dt_proj = nn.Linear(self.dt_rank, self.d_inner, bias=True, **factory_kwargs)
         self.dt_proj_b = nn.Linear(self.dt_rank, self.d_inner, bias=True, **factory_kwargs)
 
-        self.softplus = Softplus()
-        self.softplus_b = Softplus()
+        self.softplus = nn.Softplus()
+        self.softplus_b = nn.Softplus()
+
 
         self.hp = HadamardProduct()
 
@@ -144,6 +133,7 @@ class Mamba(nn.Module):
 
         x = self.conv1d(x)[..., :seqlen] # B,d_inner,L = B,384,197
         x = self.act(x) # B,d_inner,L = B,384,197
+        # plot_3d(x.squeeze(0), "x", f"./figure/{self.layer_idx}_silu.png")
 
         x_dbl = self.x_proj(rearrange(x, "b d l -> (b l) d")) 
         dt, B, C = torch.split(x_dbl, [self.dt_rank, self.d_state, self.d_state], dim=-1)
@@ -155,6 +145,7 @@ class Mamba(nn.Module):
         dt = rearrange(dt, "(b l) d -> b d l", l=seqlen) # B,d_inner,L = B,384,197
         # dt = F.softplus(dt)
         dt = self.softplus(dt)
+        # plot_3d(dt.squeeze(0), "dt", f"./figure/{self.layer_idx}_softplus.png")
 
         B = rearrange(B, "(b l) dstate -> b dstate l", l=seqlen).contiguous() # B,d_state,L = B,16,197
         C = rearrange(C, "(b l) dstate -> b dstate l", l=seqlen).contiguous() # B,d_state,L = B,16,197
@@ -162,7 +153,7 @@ class Mamba(nn.Module):
 
         y = self.selective_scan(x, dt, A, B, C, D, direction='f') # B,d_inner,L = B,384,197
         if z is not None:
-            y = y * F.silu(z) # B,d_inner,L = B,384,197
+            y = y * self.act_z(z) # B,d_inner,L = B,384,197
         y = rearrange(y, "b d l -> b l d") # B,L,d_inner = B,197,384
 
 
@@ -173,7 +164,8 @@ class Mamba(nn.Module):
         A_b = -torch.exp(self.A_b_log.float())
 
         x_b = self.conv1d_b(x_b)[..., :seqlen]
-        x_b = self.act(x_b)
+        x_b = self.act_b(x_b)
+        # plot_3d(x_b.squeeze(0), "x_b", f"./figure/{self.layer_idx}_silu_b.png")
         x_b_dbl = self.x_proj_b(rearrange(x_b, "b d l -> (b l) d"))
         dt_b, B_b, C_b = torch.split(x_b_dbl, [self.dt_rank, self.d_state, self.d_state], dim=-1)
 
@@ -181,6 +173,7 @@ class Mamba(nn.Module):
         dt_b = rearrange(dt_b, "(b l) d -> b d l", l=seqlen)
         # dt_b = F.softplus(dt_b)
         dt_b = self.softplus_b(dt_b)
+        # plot_3d(dt_b.squeeze(0), "dt_b", f"./figure/{self.layer_idx}_softplus_b.png")
 
         B_b = rearrange(B_b, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
         C_b = rearrange(C_b, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
@@ -224,14 +217,6 @@ class Mamba(nn.Module):
             out = self.ssm_b(x, deltaA, deltaB, C, D)
 
         return out
-
-
-class Softplus(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        return F.softplus(x)
     
 class HadamardProduct(nn.Module):
     def __init__(self):

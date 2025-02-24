@@ -3,6 +3,9 @@ from quant_layer.QuantConv1d import QuantConv1d
 from quant_layer.QuantConv2d import QuantConv2d
 from quant_layer.QuantLinear import QuantLinear
 from quant_layer.QuantSSM import QuantSSM
+from quant_layer.QuantSiLU import QuantSiLU
+from quant_layer.QuantSoftplus import QuantSoftplus
+from quant_layer.QuantNorm import QuantNorm
 from tqdm import tqdm
 import torch.nn.functional as F
 
@@ -87,6 +90,12 @@ class QuantCalibrator():
                         module.forward(module.raw_input.cuda())
                     elif isinstance(module, QuantSSM):
                         module.forward(module.raw_input[0].cuda(), module.raw_input[1].cuda(), module.raw_input[2].cuda(), module.raw_input[3].cuda(), module.raw_input[4].cuda())
+                    elif isinstance(module, QuantSiLU):
+                        module.forward(module.raw_input.cuda())
+                    elif isinstance(module, QuantSoftplus):
+                        module.forward(module.raw_input.cuda())
+                    elif isinstance(module, QuantNorm):
+                        module.forward(module.raw_input[0].cuda(), module.raw_input[1].cuda() if module.raw_input[1] is not None else None)
                     # elif isinstance(module, MinMaxQuantMatMul):
                     #     module.forward(module.raw_input[0].cuda(), module.raw_input[1].cuda())
                     torch.cuda.empty_cache()
@@ -117,7 +126,7 @@ class QuantCalibrator():
         print("start calibration")
 
         # assume wrapped modules are in order (true for dict in python>=3.5)
-        q = tqdm(self.wrapped_modules.items(), desc="Brecq")
+        q = tqdm(self.wrapped_modules.items(), desc="Calibration")
         for name, module in q:
             q.set_postfix_str(name)
 
@@ -132,6 +141,12 @@ class QuantCalibrator():
                 hooks.append(module.register_forward_hook(conv1d_forward_hook))
             if isinstance(module, QuantSSM):
                 hooks.append(module.register_forward_hook(ssm_forward_hook))
+            if isinstance(module, QuantSiLU):
+                hooks.append(module.register_forward_hook(silu_forward_hook))
+            if isinstance(module, QuantSoftplus):
+                hooks.append(module.register_forward_hook(softplus_forward_hook))
+            if isinstance(module, QuantNorm):
+                hooks.append(module.register_forward_hook(norm_forward_hook))
             # if isinstance(module, MinMaxQuantMatMul):
             #     hooks.append(module.register_forward_hook(matmul_forward_hook))
             
@@ -157,6 +172,16 @@ class QuantCalibrator():
             if isinstance(module, QuantSSM):
                 module.raw_input = [torch.cat(_, dim=0) for _ in module.raw_input]
                 module.raw_out = torch.cat(module.raw_out, dim=0)
+            if isinstance(module, QuantSiLU):
+                module.raw_input = torch.cat(module.raw_input, dim=0)
+                module.raw_out = torch.cat(module.raw_out, dim=0)
+            if isinstance(module, QuantSoftplus):
+                module.raw_input = torch.cat(module.raw_input, dim=0)
+                module.raw_out = torch.cat(module.raw_out, dim=0)
+            if isinstance(module, QuantNorm):
+                # module.raw_input = torch.cat(module.raw_input, dim=0)
+                module.raw_input = [torch.cat(module.raw_input[0], dim=0), torch.cat(module.raw_input[1], dim=0) if module.raw_input[1][0] is not None else None]
+                module.raw_out = torch.cat(module.raw_out, dim=0)
             # if isinstance(module, MinMaxQuantMatMul):
             #     module.raw_input = [torch.cat(_, dim=0) for _ in module.raw_input]
             #     module.raw_out = torch.cat(module.raw_out, dim=0)
@@ -173,6 +198,12 @@ class QuantCalibrator():
                     module.calibration_step2(module.raw_input.cuda())
                 if isinstance(module, QuantSSM):
                     module.calibration_step2(module.raw_input[0].cuda(), module.raw_input[1].cuda(), module.raw_input[2].cuda(), module.raw_input[3].cuda(), module.raw_input[4].cuda())
+                if isinstance(module, QuantSiLU):
+                    module.calibration_step2(module.raw_input.cuda())
+                if isinstance(module, QuantSoftplus):
+                    module.calibration_step2(module.raw_input.cuda())
+                if isinstance(module, QuantNorm):
+                    module.calibration_step2(module.raw_input[0].cuda(), module.raw_input[1].cuda() if module.raw_input[1] is not None else module.raw_input[1])
                 # if isinstance(module, MinMaxQuantMatMul):
                 #     module.calibration_step2()
                 torch.cuda.empty_cache()
@@ -228,6 +259,31 @@ def ssm_forward_hook(module, input, output):
     module.raw_input[2].append(input[2].cpu().detach())
     module.raw_input[3].append(input[3].cpu().detach())
     module.raw_input[4].append(input[4].cpu().detach())
+    module.raw_out.append(output.cpu().detach())
+
+def silu_forward_hook(module, input, output):
+    if module.raw_input is None:
+        module.raw_input = []
+    if module.raw_out is None:
+        module.raw_out = []
+    module.raw_input.append(input[0].cpu().detach())
+    module.raw_out.append(output.cpu().detach())
+
+def softplus_forward_hook(module, input, output):
+    if module.raw_input is None:
+        module.raw_input = []
+    if module.raw_out is None:
+        module.raw_out = []
+    module.raw_input.append(input[0].cpu().detach())
+    module.raw_out.append(output.cpu().detach())
+
+def norm_forward_hook(module, input, output):
+    if module.raw_input is None:
+        module.raw_input = [[], []]
+    if module.raw_out is None:
+        module.raw_out = []
+    module.raw_input[0].append(input[0].cpu().detach())
+    module.raw_input[1].append(input[1].cpu().detach() if input[1] is not None else None)
     module.raw_out.append(output.cpu().detach())
 
 # def matmul_forward_hook(module, input, output):
@@ -287,6 +343,12 @@ class HessianQuantCalibrator(QuantCalibrator):
                 hooks.append(module.register_forward_hook(conv1d_forward_hook))
             if isinstance(module, QuantSSM):
                 hooks.append(module.register_forward_hook(ssm_forward_hook))
+            if isinstance(module, QuantSiLU):
+                hooks.append(module.register_forward_hook(silu_forward_hook))
+            if isinstance(module, QuantSoftplus):
+                hooks.append(module.register_forward_hook(softplus_forward_hook))
+            if isinstance(module, QuantNorm):
+                hooks.append(module.register_forward_hook(norm_forward_hook))
             # if isinstance(module, MinMaxQuantMatMul):
             #     hooks.append(module.register_forward_hook(matmul_forward_hook))
             if hasattr(module, "metric") and module.metric == "hessian":
@@ -316,6 +378,15 @@ class HessianQuantCalibrator(QuantCalibrator):
             if isinstance(module, QuantSSM):
                 module.raw_input = [torch.cat(_, dim=0) for _ in module.raw_input]
                 module.raw_out = torch.cat(module.raw_out, dim=0)
+            if isinstance(module, QuantSiLU):
+                module.raw_input = torch.cat(module.raw_input, dim=0)
+                module.raw_out = torch.cat(module.raw_out, dim=0)
+            if isinstance(module, QuantSoftplus):
+                module.raw_input = torch.cat(module.raw_input, dim=0)
+                module.raw_out = torch.cat(module.raw_out, dim=0)
+            if isinstance(module, QuantNorm):
+                module.raw_input = [torch.cat(module.raw_input[0], dim=0), torch.cat(module.raw_input[1], dim=0) if module.raw_input[1][0] is not None else None]
+                module.raw_out = torch.cat(module.raw_out, dim=0)
             # if isinstance(module, MinMaxQuantMatMul):
             #     module.raw_input = [torch.cat(_, dim=0) for _ in module.raw_input]
             #     module.raw_out = torch.cat(module.raw_out, dim=0)
@@ -334,6 +405,12 @@ class HessianQuantCalibrator(QuantCalibrator):
                     module.calibration_step2(module.raw_input.cuda())
                 if isinstance(module, QuantSSM):
                     module.calibration_step2(module.raw_input[0].cuda(), module.raw_input[1].cuda(), module.raw_input[2].cuda(), module.raw_input[3].cuda(), module.raw_input[4].cuda())
+                if isinstance(module, QuantSiLU):
+                    module.calibration_step2(module.raw_input.cuda())
+                if isinstance(module, QuantSoftplus):
+                    module.calibration_step2(module.raw_input.cuda())
+                if isinstance(module, QuantNorm):
+                    module.calibration_step2(module.raw_input[0].cuda(), module.raw_input[1].cuda() if module.raw_input[1] is not None else None)
                 # if isinstance(module, MinMaxQuantMatMul):
                 #     module.calibration_step2(module.raw_input[0].cuda(), module.raw_input[1].cuda())
                 torch.cuda.empty_cache()
@@ -381,6 +458,12 @@ class HessianQuantCalibrator(QuantCalibrator):
                 hooks.append(module.register_forward_hook(conv1d_forward_hook))
             if isinstance(module, QuantSSM):
                 hooks.append(module.register_forward_hook(ssm_forward_hook))
+            if isinstance(module, QuantSiLU):
+                hooks.append(module.register_forward_hook(silu_forward_hook))
+            if isinstance(module, QuantSoftplus):
+                hooks.append(module.register_forward_hook(softplus_forward_hook))
+            if isinstance(module, QuantNorm):
+                hooks.append(module.register_forward_hook(norm_forward_hook))
             # if isinstance(module, MinMaxQuantMatMul):
             #     hooks.append(module.register_forward_hook(matmul_forward_hook))
             if hasattr(module, "metric"):
@@ -410,6 +493,15 @@ class HessianQuantCalibrator(QuantCalibrator):
             if isinstance(module, QuantSSM):
                 module.raw_input = [torch.cat(_, dim=0) for _ in module.raw_input]
                 module.raw_out = torch.cat(module.raw_out, dim=0)
+            if isinstance(module, QuantSiLU):
+                module.raw_input = torch.cat(module.raw_input, dim=0)
+                module.raw_out = torch.cat(module.raw_out, dim=0)
+            if isinstance(module, QuantSoftplus):
+                module.raw_input = torch.cat(module.raw_input, dim=0)
+                module.raw_out = torch.cat(module.raw_out, dim=0)
+            if isinstance(module, QuantNorm):
+                module.raw_input = [torch.cat(module.raw_input[0], dim=0), torch.cat(module.raw_input[1], dim=0) if module.raw_input[1][0] is not None else None]
+                module.raw_out = torch.cat(module.raw_out, dim=0)
             # if isinstance(module, MinMaxQuantMatMul):
             #     module.raw_input = [torch.cat(_, dim=0) for _ in module.raw_input]
             #     module.raw_out = torch.cat(module.raw_out, dim=0)
@@ -428,6 +520,12 @@ class HessianQuantCalibrator(QuantCalibrator):
                     module.calibration_step2(module.raw_input.cuda())
                 if isinstance(module, QuantSSM):
                     module.calibration_step2(module.raw_input[0].cuda(), module.raw_input[1].cuda(), module.raw_input[2].cuda(), module.raw_input[3].cuda(), module.raw_input[4].cuda())
+                if isinstance(module, QuantSiLU):
+                    module.calibration_step2(module.raw_input.cuda())
+                if isinstance(module, QuantSoftplus):
+                    module.calibration_step2(module.raw_input.cuda())
+                if isinstance(module, QuantNorm):
+                    module.calibration_step2(module.raw_input[0].cuda(), module.raw_input[1].cuda() if module.raw_input[1] is not None else None)
                 # if isinstance(module, MinMaxQuantMatMul):
                 #     module.calibration_step2()
                 torch.cuda.empty_cache()

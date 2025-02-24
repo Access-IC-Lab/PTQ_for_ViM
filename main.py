@@ -34,11 +34,6 @@ def get_args_parser():
                         help='Name of model to train')
     parser.add_argument('--input-size', default=224, type=int, help='images input size')
 
-    parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
-                        help='Dropout rate (default: 0.)')
-    parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
-                        help='Drop path rate (default: 0.1)')
-
     # Augmentation parameters
     parser.add_argument('--color-jitter', type=float, default=0.3, metavar='PCT',
                         help='Color jitter factor (default: 0.3)')
@@ -141,7 +136,7 @@ def main(args):
 
     # fix the seed for reproducibility
     # seed = args.seed + utils.get_rank()
-    seed = args.seed
+    seed = args.seed + 1
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -185,9 +180,6 @@ def main(args):
         args.model,
         pretrained=False,
         num_classes=args.nb_classes,
-        drop_rate=args.drop,
-        drop_path_rate=args.drop_path,
-        drop_block_rate=None,
         img_size=args.input_size
     )
 
@@ -221,6 +213,17 @@ def main(args):
         shuffle=True,
     )
 
+    # Single image for testing
+    dataset_single = torch.utils.data.Subset(copy.deepcopy(dataset_calib), [0])
+    data_loader_single = torch.utils.data.DataLoader(
+        dataset_single, 
+        batch_size=1,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_mem,
+        drop_last=False,
+        shuffle=False,
+    )
+
     if args.quantization:
         from quantization import quantization
         model = quantization(model, data_loader_calib, config=args.quantization_config)
@@ -229,6 +232,7 @@ def main(args):
     # Evaluation
     if args.eval:
         test_stats = evaluate(data_loader_val, model, device, amp_autocast)
+        # test_stats = evaluate(data_loader_single, model, device, amp_autocast)
         # test_stats = evaluate(data_loader_calib, model, device, amp_autocast)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         return

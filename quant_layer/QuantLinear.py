@@ -18,7 +18,6 @@ class QuantLinear(nn.Linear):
         w_config=QuantConfig(),
         i_config=QuantConfig(),
         o_config=QuantConfig(),
-        L=197,
     ):
         super().__init__(in_features, out_features, bias)
 
@@ -32,8 +31,6 @@ class QuantLinear(nn.Linear):
         self.w_config = w_config
         self.i_config = i_config
         self.o_config = o_config
-
-        self.L = L
 
         self.metric = None
         self.next_nodes = []
@@ -99,19 +96,27 @@ class QuantLinear(nn.Linear):
         return out_sim
 
     def _bias_correction_quant_forward(self, x):
-        # if self.bias_correction and self.bias != None:
-        if self.bias_correction:
+        if self.bias_correction and self.bias != None:
             w_sim = self.quant_weight_bias()[0]
             x_sim = self.quant_input(x)
             eps = F.linear(x_sim, w_sim - self.weight.data, None)
             eps = torch.mean(eps, dim=(list(range(len(eps.shape) - 1))), keepdim=False)
-            if self.bias is None:
-                # self.bias = -eps
-                self.bias = torch.nn.Parameter(-eps).to("cuda")
-            else:
-                self.bias -= eps
+            self.bias -= eps
             self.bias_correction = False
         return self.quant_forward(x)
+    
+    # def _bias_correction_quant_forward(self, x):
+    #     if self.bias_correction:
+    #         w_sim = self.quant_weight_bias()[0]
+    #         x_sim = self.quant_input(x)
+    #         eps = F.linear(x_sim, w_sim - self.weight.data, None)
+    #         eps = torch.mean(eps, dim=(list(range(len(eps.shape) - 1))), keepdim=False)
+    #         if self.bias is None:
+    #             self.bias = torch.nn.Parameter(-eps).to("cuda")
+    #         else:
+    #             self.bias -= eps
+    #         self.bias_correction = False
+    #     return self.quant_forward(x)
 
     def quant_weight_bias(self):
         if not self.w_config.quant:
@@ -183,7 +188,6 @@ class QuantLinear(nn.Linear):
                 pass
             elif self.o_config.k_scaled_config.k_scaled_mode == "token_wise":
                 out = out.transpose(-2, -1)
-            # self.o_config.k_scaled_config.k_scaled_clusters = self._kmeans(out, self.o_config.k_scaled_config.k, num_iters=100, dim=-1) # shape: D or L
             self.o_config.k_scaled_config.k_scaled_clusters = kmeans(out, self.o_config.k_scaled_config.k, num_iters=100, dim=-1)  # shape: D or L
             self.o_config.interval = torch.zeros(self.o_config.k_scaled_config.k)  # shape: K
             self.o_config.zeropoint = torch.zeros(self.o_config.k_scaled_config.k)  # shape: K
@@ -223,7 +227,7 @@ class QuantLinear(nn.Linear):
         similarities = []
         for p_st in range(0, self.i_config.similarity_config.eq_n, self.i_config.similarity_config.parallel_eq_n):
             p_ed = min(self.i_config.similarity_config.eq_n, p_st + self.i_config.similarity_config.parallel_eq_n)
-            cur_i_interval = input_interval_candidates[p_st:p_ed].unsqueeze(-1)  # shape: parallel_eq_n, 1
+            cur_i_interval = input_interval_candidates[p_st:p_ed].unsqueeze(-1) # shape: parallel_eq_n, 1
             # quantize weight and bias
             w_sim, bias_sim = self.quant_weight_bias()
             # quantize input
@@ -297,15 +301,12 @@ class QuantLinear(nn.Linear):
             self.o_config.interval = output_interval_candidates[o_best_index]
 
     def calibration_step1(self, x):
-        # step1: collection the FP32 values
-        print("calibration_step1")
         out = F.linear(x, self.weight, self.bias)
         self.raw_input = x.cpu().detach()
         self.raw_out = out.cpu().detach()
         return out
 
     def calibration_step2(self, x):
-        # step2: search for the best S^w and S^o of each layer
         out = F.linear(x, self.weight, self.bias)  # shape: B, *, oc
 
         self._initialize_intervals(x, out)
