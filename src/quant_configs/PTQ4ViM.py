@@ -1,8 +1,11 @@
 import torch.nn as nn
-from quant_layer.QuantConv1d import *
-from quant_layer.QuantConv2d import *
-from quant_layer.QuantLinear import *
-from quant_layer.QuantSSM import *
+from quant_layers.QuantConv1d import *
+from quant_layers.QuantConv2d import *
+from quant_layers.QuantLinear import *
+from quant_layers.QuantSSM import *
+from quant_layers.QuantSiLU import *
+from quant_layers.QuantSoftplus import *
+from quant_layers.QuantNorm import *
 
 eq_alpha = 0.01
 eq_beta = 1.2
@@ -27,7 +30,6 @@ def get_module(module_type, *args, **kwargs):
         module = QuantConv2d(*args,**kwargs)
         pass
     elif module_type == "qconv1d":
-        # module=KScaleChannelWiseQuantConv1d(*args,**kwargs,w_bit=8,i_bit=32,o_bit=8,k=4)
         qconv1d_kwargs = {
             "search_round": 3,
             "w_config": QuantConfig(
@@ -36,7 +38,7 @@ def get_module(module_type, *args, **kwargs):
                 bin = "uniform",
                 bit = 8,
                 similarity_config = SimilarityQuantConfig(
-                    metric = "cosine", # "cosine", "L2_norm", "L1_norm"
+                    metric = "cosine",
                     eq_alpha = eq_alpha,
                     eq_beta = eq_beta,
                     eq_n = eq_n,
@@ -51,7 +53,7 @@ def get_module(module_type, *args, **kwargs):
                 bin = "uniform",
                 bit = 8,
                 similarity_config = SimilarityQuantConfig(
-                    metric = "cosine", # "cosine", "L2_norm", "L1_norm"
+                    metric = "cosine",
                     eq_alpha = eq_alpha,
                     eq_beta = eq_beta,
                     eq_n = eq_n,
@@ -68,19 +70,6 @@ def get_module(module_type, *args, **kwargs):
         module = QuantConv1d(*args,**kwargs)
         pass
     elif module_type == "qin_proj":
-        # qin_proj_kwargs = {
-        #     "w_config": QuantConfig(
-        #         quant = True,
-        #         bit = 8,
-        #     ),
-        #     "i_config": QuantConfig(
-        #         quant = False,
-        #     ),
-        #     "o_config": QuantConfig(
-        #         quant = True,
-        #         bit = 8,
-        #     ),
-        # }
         qin_proj_kwargs = {
             "search_round": 3,
             "w_config": QuantConfig(
@@ -121,19 +110,6 @@ def get_module(module_type, *args, **kwargs):
         module = QuantLinear(*args,**kwargs)
         pass
     elif module_type == "qx_proj":
-        # qx_proj_kwargs = {
-        #     "w_config": QuantConfig(
-        #         quant = True,
-        #         bit = 8,
-        #     ),
-        #     "i_config": QuantConfig(
-        #         quant = False,
-        #     ),
-        #     "o_config": QuantConfig(
-        #         quant = True,
-        #         bit = 8,
-        #     ),
-        # }
         qx_proj_kwargs = {
             "search_round": 3,
             "w_config": QuantConfig(
@@ -174,19 +150,6 @@ def get_module(module_type, *args, **kwargs):
         module = QuantLinear(*args,**kwargs)
         pass
     elif module_type == "qdt_proj":
-        # qdt_proj_kwargs = {
-        #     "w_config": QuantConfig(
-        #         quant = True,
-        #         bit = 8,
-        #     ),
-        #     "i_config": QuantConfig(
-        #         quant = False,
-        #     ),
-        #     "o_config": QuantConfig(
-        #         quant = True,
-        #         bit = 8,
-        #     ),
-        # }
         qdt_proj_kwargs = {
             "search_round": 3,
             "w_config": QuantConfig(
@@ -235,7 +198,7 @@ def get_module(module_type, *args, **kwargs):
                 bin = "uniform",
                 bit = 8,
                 similarity_config = SimilarityQuantConfig(
-                    metric = "cosine", # "cosine", "L2_norm", "L1_norm"
+                    metric = "cosine",
                     eq_alpha = eq_alpha,
                     eq_beta = eq_beta,
                     eq_n = eq_n,
@@ -250,7 +213,7 @@ def get_module(module_type, *args, **kwargs):
                 bin = "uniform",
                 bit = 8,
                 similarity_config = SimilarityQuantConfig(
-                    metric = "cosine", # "cosine", "L2_norm", "L1_norm"
+                    metric = "cosine",
                     eq_alpha = eq_alpha,
                     eq_beta = eq_beta,
                     eq_n = eq_n,
@@ -267,19 +230,6 @@ def get_module(module_type, *args, **kwargs):
         module = QuantLinear(*args,**kwargs)
         pass
     elif module_type == "qhead":
-        # qhead_proj_kwargs = {
-        #     "w_config": QuantConfig(
-        #         quant = True,
-        #         bit = 8,
-        #     ),
-        #     "i_config": QuantConfig(
-        #         quant = False,
-        #     ),
-        #     "o_config": QuantConfig(
-        #         quant = True,
-        #         bit = 8,
-        #     ),
-        # }
         qhead_proj_kwargs = {
             "search_round": 3,
             "w_config": QuantConfig(
@@ -319,7 +269,7 @@ def get_module(module_type, *args, **kwargs):
         kwargs.update(qhead_proj_kwargs)
         module = QuantLinear(*args,**kwargs)
         pass
-    if module_type == "qssm":
+    elif module_type == "qssm":
         ssm_kwargs = {
             "search_round": 3,
             "reparameterization": True,
@@ -378,5 +328,74 @@ def get_module(module_type, *args, **kwargs):
         }
         kwargs.update(ssm_kwargs)
         module = QuantSSM(*args,**kwargs)
+        pass
+    elif module_type == "qact":
+        qact_kwargs = {
+            "i_config": QuantConfig(
+                quant = False,
+            ),
+            "o_config": QuantConfig(
+                quant = True,
+                qmode = "similarity", # "minmax", "similarity"
+                bit = 8,
+                similarity_config = SimilarityQuantConfig(
+                    metric = "cosine", # "cosine", "L2_norm", "L1_norm"
+                    eq_alpha = eq_alpha,
+                    eq_beta = eq_beta,
+                    eq_n = eq_n,
+                ),
+                k_scaled_config = KScaledQuantConfig(
+                    k_scaled = True,
+                    k_scaled_mode = "channel_wise",
+                    k = 4,
+                    k_scaled_power_of_two_scaling = False
+                )
+            ),
+        }
+        kwargs.update(qact_kwargs)
+        module = QuantSiLU(*args,**kwargs)
+        pass
+    elif module_type == "qsoftplus":
+        qsoftplus_kwargs = {
+            "i_config": QuantConfig(
+                quant = False,
+            ),
+            "o_config": QuantConfig(
+                quant = True,
+                qmode = "similarity", # "minmax", "similarity"
+                bit = 8,
+                similarity_config = SimilarityQuantConfig(
+                    metric = "cosine", # "cosine", "L2_norm", "L1_norm"
+                    eq_alpha = eq_alpha,
+                    eq_beta = eq_beta,
+                    eq_n = eq_n,
+                ),
+                k_scaled_config = KScaledQuantConfig(
+                    k_scaled = True,
+                    k_scaled_mode = "channel_wise",
+                    k = 4,
+                    k_scaled_power_of_two_scaling = False
+                )
+            ),
+        }
+        kwargs.update(qsoftplus_kwargs)
+        module = QuantSoftplus(*args,**kwargs)
+        pass
+    elif module_type == "qnorm":
+        qnorm_kwargs = {
+            "w_config": QuantConfig(
+                quant = True,
+                bit = 8,
+            ),
+            "i_config": QuantConfig(
+                quant = False,
+            ),
+            "o_config": QuantConfig(
+                quant = True,
+                bit = 8,
+            ),
+        }
+        kwargs.update(qnorm_kwargs)
+        module = QuantNorm(*args,**kwargs)
         pass
     return module

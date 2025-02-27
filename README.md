@@ -72,7 +72,7 @@ source scripts/q-eval-pt-{t/s}.sh {GPU}
 
 ### Quantization Configuration Setting
 
-QuantConfig class can be found in `quant_config/QuantConfig.py`. Basic setting for this work is defined in `quant_config/PTQ4ViM.py`.
+QuantConfig class can be found in `quant_configs/QuantConfig.py`. Basic setting for this work is defined in `quant_configs/PTQ4ViM.py`.
 
 
 ## Acknowledgement

@@ -3,10 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from quant_config.QuantConfig import *
-from ssm import SequentialSSM
-from tensor_decomposition import *
-from kmeans import *
+from quant_configs.QuantConfig import *
+from layers.ssm import SequentialSSM
+from tools.tensor_decomposition import *
+from tools.kmeans import *
 
 class QuantSSM(SequentialSSM):
     """

@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from quant_config.QuantConfig import *
-from kmeans import *
+from quant_configs.QuantConfig import *
+from tools.kmeans import *
 
 class QuantSiLU(nn.SiLU):
     def __init__(

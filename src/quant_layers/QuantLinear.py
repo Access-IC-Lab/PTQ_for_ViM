@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from kmeans import *
-from quant_config.QuantConfig import *
+from tools.kmeans import *
+from quant_configs.QuantConfig import *
 
 
 class QuantLinear(nn.Linear):
@@ -317,7 +317,6 @@ class QuantLinear(nn.Linear):
         if self.w_config.k_scaled_config.k_scaled:
             pass
         else:
-            # print(self.w_config.interval.shape)
             weight_interval_candidates = (
                 torch.tensor([self.w_config.similarity_config.eq_alpha + i * (self.w_config.similarity_config.eq_beta - self.w_config.similarity_config.eq_alpha) / self.w_config.similarity_config.eq_n for i in range(self.w_config.similarity_config.eq_n + 1)]).cuda() * self.w_config.interval
             )  # shape: eq_n + 1

@@ -8,14 +8,13 @@ import torch
 import datetime
 
 from timm.utils import accuracy
-
-import utils
+from utils.logger import MetricLogger
 
 @torch.no_grad()
 def evaluate(data_loader, model, device, amp_autocast):
     criterion = torch.nn.CrossEntropyLoss()
 
-    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger = MetricLogger(delimiter="  ")
     header = 'Test:'
 
     # switch to evaluation mode
@@ -42,7 +41,7 @@ def evaluate(data_loader, model, device, amp_autocast):
           .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
 
     current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"./record/results_{current_time}.txt"
+    filename = f"./records/results_{current_time}.txt"
     with open(filename, "w") as file:
         file.write('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}\n'
                 .format(top1=metric_logger.acc1, 

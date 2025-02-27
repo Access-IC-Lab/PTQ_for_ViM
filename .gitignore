@@ -1,5 +1,9 @@
-__pycache__/
-
-mlruns/
+**/__pycache__/
+**/mlruns/
+**/helper/
+**/figures/
+**/records/
 
 *.pyc
+
+**/TestPTQ.py

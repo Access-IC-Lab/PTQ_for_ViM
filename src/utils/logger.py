@@ -1,19 +1,15 @@
 # Copyright (c) 2015-present, Facebook, Inc.
 # All rights reserved.
 """
-Misc functions, including distributed helpers.
+Logger functions.
 
 Mostly copy-paste from torchvision references.
 """
-import io
-import os
 import time
 from collections import defaultdict, deque
 import datetime
 
 import torch
-import torch.distributed as dist
-
 
 class SmoothedValue(object):
     """Track a series of values and provide access to smoothed values over a
@@ -32,19 +28,6 @@ class SmoothedValue(object):
         self.deque.append(value)
         self.count += n
         self.total += value * n
-
-    def synchronize_between_processes(self):
-        """
-        Warning: does not synchronize the deque!
-        """
-        if not is_dist_avail_and_initialized():
-            return
-        t = torch.tensor([self.count, self.total], dtype=torch.float64, device='cuda')
-        dist.barrier()
-        dist.all_reduce(t)
-        t = t.tolist()
-        self.count = int(t[0])
-        self.total = t[1]
 
     @property
     def median(self):
@@ -105,10 +88,6 @@ class MetricLogger(object):
             )
         return self.delimiter.join(loss_str)
 
-    def synchronize_between_processes(self):
-        for meter in self.meters.values():
-            meter.synchronize_between_processes()
-
     def add_meter(self, name, meter):
         self.meters[name] = meter
 
@@ -157,26 +136,3 @@ class MetricLogger(object):
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('{} Total time: {} ({:.4f} s / it)'.format(
             header, total_time_str, total_time / len(iterable)))
-
-
-def setup_for_distributed(is_master):
-    """
-    This function disables printing when not in master process
-    """
-    import builtins as __builtin__
-    builtin_print = __builtin__.print
-
-    def print(*args, **kwargs):
-        force = kwargs.pop('force', False)
-        if is_master or force:
-            builtin_print(*args, **kwargs)
-
-    __builtin__.print = print
-
-
-def is_dist_avail_and_initialized():
-    if not dist.is_available():
-        return False
-    if not dist.is_initialized():
-        return False
-    return True

@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from quant_config.QuantConfig import *
-from kmeans import *
-from rms_norm import *
+from quant_configs.QuantConfig import *
+from tools.kmeans import *
+from layers.rms_norm import *
 
 class QuantNorm(RMSNorm):
     def __init__(

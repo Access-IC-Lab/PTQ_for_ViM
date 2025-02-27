@@ -2,11 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from quant_config.QuantConfig import *
-from kmeans import *
+from quant_configs.QuantConfig import *
+from tools.kmeans import *
 
 
-class QuantConv1d(nn.Conv1d):
+class QuantConv2d(nn.Conv2d):
     def __init__(
         self,
         in_channels: int,
@@ -87,43 +87,11 @@ class QuantConv1d(nn.Conv1d):
             return torch.quantile(tensor.view(-1)[:16777216*n].view(n,16777216),quantile,1).mean()
         else:
             return torch.quantile(tensor,quantile)
-
-
-    # def _kmeans(self, tensor, k, num_iters=100):
-    #     """
-    #     Example: 
-
-    #     If a = torch.tensor([100, 1, 2, 3, 200, 110, 210]) and self.k = 3
-
-    #     Then _kmeans(a) = [1, 0, 0, 0, 2, 1, 2]
-    #     """
-
-    #     indices = torch.randperm(tensor.size(1))[:k]
-    #     tensor = tensor.abs().mean([0, 2])
-    #     centroids = tensor[indices]
-
-    #     for _ in range(num_iters):
-    #         distances = torch.abs(tensor.unsqueeze(-1) - centroids.unsqueeze(0))  # D,K
-    #         labels = torch.argmin(distances, dim=-1) # D
-    #         new_centroids = torch.stack([tensor[labels == i].mean() for i in range(k)])
-
-    #         if torch.allclose(centroids, new_centroids, rtol=1e-4):
-    #             break
-
-    #         centroids = new_centroids
-
-    #     sorted_centroids, sorted_indices = torch.sort(centroids)
-
-    #     new_labels = torch.zeros_like(labels)
-    #     for new_idx, old_idx in enumerate(sorted_indices):
-    #         new_labels[labels == old_idx] = new_idx
-
-    #     return new_labels
         
 
     def forward(self, x):
         if self.mode == 'raw':
-            out = F.conv1d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+            out = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
         elif self.mode == "quant_forward":
             out = self.quant_forward(x)
         elif self.mode == "calibration_step1":
@@ -139,7 +107,7 @@ class QuantConv1d(nn.Conv1d):
         assert self.calibrated is not None,f"You should run calibrate_forward before run quant_forward for {self}"
         w_sim, bias_sim = self.quant_weight_bias()
         x_sim = self.quant_input(x)
-        out = F.conv1d(x_sim, w_sim, bias_sim, self.stride, self.padding, self.dilation, self.groups)
+        out = F.conv2d(x_sim, w_sim, bias_sim, self.stride, self.padding, self.dilation, self.groups)
         out_sim = self.quant_output(out)
         return out_sim
 
@@ -171,7 +139,7 @@ class QuantConv1d(nn.Conv1d):
             if self.i_config.k_scaled_config.k_scaled:
                 cur_i_interval = torch.tensor([self.i_config.interval[i] for i in self.i_config.k_scaled_config.k_scaled_clusters]).to(x.device)
                 cur_i_zeropoint = torch.tensor([self.i_config.zeropoint[i] for i in self.i_config.k_scaled_config.k_scaled_clusters]).to(x.device)
-            x_sim=((x - cur_i_zeropoint) / (cur_i_interval + 1e-7)).round_().clamp_(-self.i_config.qmax,self.i_config.qmax-1)
+            x_sim = ((x - cur_i_zeropoint) / (cur_i_interval + 1e-7)).round_().clamp_(-self.i_config.qmax,self.i_config.qmax-1)
             x_sim.mul_(cur_i_interval)
             x_sim.add_(cur_i_zeropoint)
             return x_sim
@@ -208,16 +176,11 @@ class QuantConv1d(nn.Conv1d):
             self.i_config.interval = (x.abs().max() / (self.i_config.qmax - 0.5)).detach()
 
         if self.o_config.k_scaled_config.k_scaled:
-            # self.o_config.k_scaled_config.k_scaled_clusters = self._kmeans(out, self.o_config.k_scaled_config.k, num_iters=100) # shape: D or L
             self.o_config.k_scaled_config.k_scaled_clusters = kmeans(out, self.o_config.k_scaled_config.k, num_iters=100, dim=1) # shape: D or L
             self.o_config.interval = torch.zeros(self.o_config.k_scaled_config.k) # shape: K
             self.o_config.zeropoint = torch.zeros(self.o_config.k_scaled_config.k) # shape: K
             for cluster_index in range(self.o_config.k_scaled_config.k):
                 self.o_config.interval[cluster_index] = ((out * torch.eq(self.o_config.k_scaled_config.k_scaled_clusters, cluster_index).unsqueeze(-1)).abs().max() / (self.o_config.qmax - 0.5)).detach() # shape: K
-
-            # if self.o_config.k_scaled_config.k_scaled_power_of_two_scaling:
-            #     for cluster_index in range(1, self.o_config.k_scaled_config.k):
-            #         self.o_config.interval[cluster_index] = self.o_config.interval[0] * torch.pow(2, torch.log2(self.o_config.interval[cluster_index] / self.o_config.interval[0]).round())
         else:
             self.o_config.interval = (out.abs().max() / (self.o_config.qmax - 0.5)).detach() # shape: 1
 
@@ -226,22 +189,22 @@ class QuantConv1d(nn.Conv1d):
         similarities = []
         for p_st in range(0, self.w_config.similarity_config.eq_n, self.w_config.similarity_config.parallel_eq_n):
             p_ed = min(self.w_config.similarity_config.eq_n, p_st + self.w_config.similarity_config.parallel_eq_n)
-            cur_w_interval = weight_interval_candidates[p_st:p_ed].view(-1, 1, 1, 1) # shape: parallel_eq_n, 1, 1, 1
+            cur_w_interval = weight_interval_candidates[p_st:p_ed].view(-1, 1, 1, 1, 1) # shape: parallel_eq_n, 1, 1, 1, 1
             # quantize weight and bias
-            oc, ic, kl = self.weight.shape
-            w_sim = self.weight.unsqueeze(0) # shape: 1, oc, ic, kl
-            w_sim = (self.weight/cur_w_interval).round_().clamp_(-self.w_config.qmax, self.w_config.qmax-1) * cur_w_interval # shape: parallel_eq_n, oc, ic, kl
-            w_sim = w_sim.view(-1, ic, kl) # shape: parallel_eq_n * oc, ic, kl
+            oc, ic, kw, kh = self.weight.shape
+            w_sim = self.weight.unsqueeze(0) # shape: 1, oc, ic, kw, kh
+            w_sim = (self.weight/cur_w_interval).round_().clamp_(-self.w_config.qmax, self.w_config.qmax-1) * cur_w_interval # shape: parallel_eq_n, oc, ic, kw, kh
+            w_sim = w_sim.view(-1, ic, kw, kh) # shape: parallel_eq_n * oc, ic, kw, kh
             bias_sim = self.bias.repeat(p_ed-p_st) if self.bias is not None else None
             # quantize input
-            x_sim = self.quant_input(x) # shape: B, ic, il
+            x_sim = self.quant_input(x) # shape: B, ic, iw, ih
             # quantize output
-            out = F.conv1d(x_sim, w_sim, bias_sim, self.stride, self.padding, self.dilation, self.groups) # shape: B, parallel_eq_n * oc, fl
-            out = torch.cat(torch.chunk(out.unsqueeze(2), chunks=oc, dim=1), dim=2) # shape: B, parallel_eq_n, oc, fl
-            out_sim = self.quant_output(out) # shape: B, parallel_eq_n, oc, fl
+            out = F.conv2d(x_sim, w_sim, bias_sim, self.stride, self.padding, self.dilation, self.groups) # shape: B, parallel_eq_n * oc, fw, fh
+            out = torch.cat(torch.chunk(out.unsqueeze(2), chunks=oc, dim=1), dim=2) # shape: B, parallel_eq_n, oc, fw, fh
+            out_sim = self.quant_output(out) # shape: B, parallel_eq_n, oc, fw, fh
             # calculate similarity and store them
-            similarity = self._get_similarity(self.raw_out.unsqueeze(1), out_sim, self.w_config.similarity_config.metric, dim=2) # shape: B, parallel_eq_n, fl
-            similarity = torch.mean(similarity, dim=[0,2]) # shape: parallel_eq_n
+            similarity = self._get_similarity(self.raw_out.unsqueeze(1), out_sim, self.w_config.similarity_config.metric, dim=2) # shape: B, parallel_eq_n, fw, fh
+            similarity = torch.mean(similarity, dim=[0, 2, 3]) # shape: parallel_eq_n
             similarities.append(similarity)
         # store best weight interval and store in w_interval
         similarities = torch.cat(similarities, dim=0) # shape: eq_n
@@ -253,20 +216,20 @@ class QuantConv1d(nn.Conv1d):
         similarities = []
         for p_st in range(0, self.i_config.similarity_config.eq_n, self.i_config.similarity_config.parallel_eq_n):
             p_ed = min(self.i_config.similarity_config.eq_n, p_st + self.i_config.similarity_config.parallel_eq_n)
-            cur_i_interval = input_interval_candidates[p_st:p_ed].view(-1, 1, 1, 1) # shape: parallel_eq_n, 1, 1, 1
+            cur_i_interval = input_interval_candidates[p_st:p_ed].view(-1, 1, 1, 1, 1) # shape: parallel_eq_n, 1, 1, 1
             # quantize weight and bias
             w_sim, bias_sim = self.quant_weight_bias()
             # quantize input
-            B, ic, il = x.shape
-            x_sim = x.unsqueeze(0) # shape: 1, B, ic, il
-            x_sim = (x_sim / cur_i_interval).round_().clamp_(-self.i_config.qmax, self.i_config.qmax-1) * cur_i_interval # shape: parallel_eq_n, B, ic, il
-            x_sim = x_sim.view(-1, ic, il) # shape: parallel_eq_n * B, ic, il
+            B, ic, iw, ih = x.shape
+            x_sim = x.unsqueeze(0) # shape: 1, B, ic, iw, ih
+            x_sim = (x_sim / cur_i_interval).round_().clamp_(-self.i_config.qmax, self.i_config.qmax-1) * cur_i_interval # shape: parallel_eq_n, B, ic, iw, ih
+            x_sim = x_sim.view(-1, ic, iw, ih) # shape: parallel_eq_n * B, ic, iw, ih
             # quantize output
-            out = F.conv1d(x_sim, w_sim, bias_sim, self.stride, self.padding, self.dilation, self.groups) # shape: parallel_eq_n * B, oc, fl
-            out_sim = self.quant_output(out) # shape: parallel_eq_n, B, oc, fl
+            out = F.conv2d(x_sim, w_sim, bias_sim, self.stride, self.padding, self.dilation, self.groups) # shape: parallel_eq_n * B, oc, fw, fh
+            out_sim = self.quant_output(out) # shape: parallel_eq_n, B, oc, fw, fh
             # calculate similarity and store them
-            similarity = self._get_similarity(self.raw_out.unsqueeze(0), out_sim, self.i_config.similarity_config.metric, dim=2) # shape: parallel_eq_n, B, fl
-            similarity = torch.mean(similarity, dim=[1, 2]) # shape: parallel_eq_n
+            similarity = self._get_similarity(self.raw_out.unsqueeze(0), out_sim, self.i_config.similarity_config.metric, dim=2) # shape: parallel_eq_n, B, fw, fh
+            similarity = torch.mean(similarity, dim=[1, 2, 3]) # shape: parallel_eq_n
             similarities.append(similarity)
         # store best input interval and store in i_interval
         similarities = torch.cat(similarities, dim=0) # shape: eq_n
@@ -281,18 +244,18 @@ class QuantConv1d(nn.Conv1d):
                 for p_st in range(0, self.o_config.similarity_config.eq_n, self.o_config.similarity_config.parallel_eq_n):
                     p_ed = min(self.o_config.similarity_config.eq_n, p_st + self.o_config.similarity_config.parallel_eq_n)
                     cur_o_interval = torch.where(self.o_config.k_scaled_config.k_scaled_clusters == cluster_index, output_interval_candidates[cluster_index][p_st:p_ed].unsqueeze(-1), self.o_config.interval.cuda()[self.o_config.k_scaled_config.k_scaled_clusters]) # shape: parallel_eq_n, oc
-                    cur_o_interval = cur_o_interval.unsqueeze(1).unsqueeze(-1) # shape: parallel_eq_n, 1, oc, 1
+                    cur_o_interval = cur_o_interval.unsqueeze(1).unsqueeze(-1).unsqueeze(-1) # shape: parallel_eq_n, 1, oc, 1, 1
                     # quantize weight and bias
                     w_sim, bias_sim = self.quant_weight_bias()
                     # quantize input
-                    x_sim = self.quant_input(x) # shape: B, ic, il
+                    x_sim = self.quant_input(x) # shape: B, ic, iw, ih
                     # quantize output
-                    out = F.conv1d(x_sim, w_sim, bias_sim, self.stride, self.padding, self.dilation, self.groups) # shape: B, oc, fl
-                    out = out.unsqueeze(0) # shape: 1, B, oc, fl
-                    out_sim = (out / cur_o_interval).round_().clamp_(-self.o_config.qmax, self.o_config.qmax-1) * cur_o_interval # shape: parallel_eq_n, B, oc, fl
+                    out = F.conv2d(x_sim, w_sim, bias_sim, self.stride, self.padding, self.dilation, self.groups) # shape: B, oc, fw, fh
+                    out = out.unsqueeze(0) # shape: 1, B, oc, fw, fh
+                    out_sim = (out / cur_o_interval).round_().clamp_(-self.o_config.qmax, self.o_config.qmax-1) * cur_o_interval # shape: parallel_eq_n, B, oc, fw, fh
                     # calculate similarity and store them
-                    similarity = self._get_similarity(self.raw_out.unsqueeze(0), out_sim, self.o_config.similarity_config.metric, dim=2) # shape: parallel_eq_n, B, fl
-                    similarity = torch.mean(similarity, dim=[1, 2]) # shape: parallel_eq_n
+                    similarity = self._get_similarity(self.raw_out.unsqueeze(0), out_sim, self.o_config.similarity_config.metric, dim=2) # shape: parallel_eq_n, B, fw, fh
+                    similarity = torch.mean(similarity, dim=[1, 2, 3]) # shape: parallel_eq_n
                     similarities.append(similarity)
                 # store best output interval and store in o_interval
                 similarities = torch.cat(similarities, dim=0)
@@ -302,18 +265,18 @@ class QuantConv1d(nn.Conv1d):
             similarities = []
             for p_st in range(0, self.o_config.similarity_config.eq_n, self.o_config.similarity_config.parallel_eq_n):
                 p_ed = min(self.o_config.similarity_config.eq_n, p_st + self.o_config.similarity_config.parallel_eq_n)
-                cur_o_interval = output_interval_candidates[p_st:p_ed].view(-1, 1, 1, 1) # shape: parallel_eq_n, 1, 1, 1
+                cur_o_interval = output_interval_candidates[p_st:p_ed].view(-1, 1, 1, 1, 1) # shape: parallel_eq_n, 1, 1, 1, 1
                 # quantize weight and bias 
                 w_sim, bias_sim = self.quant_weight_bias()
                 # quantize input
-                x_sim = self.quant_input(x) # shape: B, ic, il
+                x_sim = self.quant_input(x) # shape: B, ic, iw, ih
                 # quantize output
-                out = F.conv1d(x_sim, w_sim, bias_sim, self.stride, self.padding, self.dilation, self.groups) # shape: B, oc, fl
-                out = out.unsqueeze(0) # shape: 1, B, oc, fl
-                out_sim = (out / cur_o_interval).round_().clamp_(-self.o_config.qmax, self.o_config.qmax - 1) * cur_o_interval # shape: parallel_eq_n, B, oc, fl
+                out = F.conv2d(x_sim, w_sim, bias_sim, self.stride, self.padding, self.dilation, self.groups) # shape: B, oc, fw, fh
+                out = out.unsqueeze(0) # shape: 1, B, oc, fw, fh
+                out_sim = (out / cur_o_interval).round_().clamp_(-self.o_config.qmax, self.o_config.qmax - 1) * cur_o_interval # shape: parallel_eq_n, B, oc, fw, fh
                 # calculate similarity and store them
-                similarity = self._get_similarity(self.raw_out.unsqueeze(0), out_sim, self.o_config.similarity_config.metric, dim=2) # shape: parallel_eq_n, B, fl
-                similarity = torch.mean(similarity, dim=[1, 2]) # shape: parallel_eq_n
+                similarity = self._get_similarity(self.raw_out.unsqueeze(0), out_sim, self.o_config.similarity_config.metric, dim=2) # shape: parallel_eq_n, B, fw, fh
+                similarity = torch.mean(similarity, dim=[1, 2, 3]) # shape: parallel_eq_n
                 similarities.append(similarity)
             # store best output interval and store in o_interval
             similarities = torch.cat(similarities, dim=0) # shape: eq_n
@@ -323,7 +286,7 @@ class QuantConv1d(nn.Conv1d):
     
     def calibration_step1(self,x):
         # step1: collection the FP32 values
-        out = F.conv1d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+        out = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
         self.raw_input = x.cpu().detach()
         self.raw_out = out.cpu().detach()
         return out
@@ -331,10 +294,10 @@ class QuantConv1d(nn.Conv1d):
 
     def calibration_step2(self, x): # TODO
         # step2: search for the best S^w and S^o of each layer
-        out = F.conv1d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+        out = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
         self._initialize_intervals(x, out)
 
-        self.raw_out = self.raw_out.to(x.device) # shape: B, oc, fl
+        self.raw_out = self.raw_out.to(x.device) # shape: B, oc, fw, fh
         self.raw_grad = self.raw_grad.to(x.device) if self.raw_grad != None else None
         
         if self.w_config.k_scaled_config.k_scaled:
