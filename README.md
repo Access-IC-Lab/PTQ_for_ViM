@@ -2,7 +2,7 @@
 <h1>PTQ for ViM </h1>
 <h3>PTQ for ViM with k-Scaled Quantization and Reparameterization</h3>
 
-Bo-Yun Shi, Yi-Cheng Lo, An-Yeu (Andy) Wu, and Yi-Min Tsai
+Bo-Yun Shi, Yi-Cheng Lo, Yi-Min Tsai, and An-Yeu (Andy) Wu
 
 Paper: ([arXiv 2501.16738](https://arxiv.org/abs/2501.16738))
 
